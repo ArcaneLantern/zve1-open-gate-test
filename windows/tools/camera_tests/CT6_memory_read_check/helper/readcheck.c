@@ -1257,6 +1257,14 @@ extern u32 sen_dma_transfer(u32 dir, u64 src, u64 dst, u32 size);   /* dir 0: co
 #define OBJ 0x50U                          /* one unit object: +2 flags (bit 0: divided), +0x14 size, +0x20 parent object, +0x24 key */
 #define POOL (N_OBJ * OBJ)
 #define N_SITES (sizeof dmm_sites / sizeof dmm_sites[0])
+/* The texts name the A7 IV design's four words; a design with another count names its own (-DDMM_WORDS_TEXT= ...: helper_zv/build_zv_write.sh).
+   The defaults give the same strings as before, so the A7 IV and A7C II libraries build to their pinned hashes. */
+#ifndef DMM_WORDS_TEXT
+#define DMM_WORDS_TEXT "the four memory-manager words"
+#define DMM_DONE_TEXT "all four sites hold"
+#define DMM_RECS_TEXT "the four records and the parent's are as in the file; two units of the new size fit"
+#define DMM_NOFIT_TEXT "two units of the new size do not fit the parent"
+#endif
 #if LEVEL == 13
 #define FROM(s) ((s)->stock)               /* what a site must hold before */
 #define TO(s) ((s)->changed)               /* what it holds after */
@@ -1364,9 +1372,9 @@ static int precheck(const struct dmm_rec *recs, u32 nrecs, const struct dmm_rec 
                 put32("!! the parent's record at", parents[k].address); puts_(" is not as in the file; nothing is written\n");
                 return 1;
             }
-        if ((u64)fit[1] * fit[0] > le32(p + 12)) { puts_("!! two units of the new size do not fit the parent; nothing is written\n"); return 1; }
+        if ((u64)fit[1] * fit[0] > le32(p + 12)) { puts_("!! " DMM_NOFIT_TEXT "; nothing is written\n"); return 1; }
     }
-    puts_("checks passed: no unit of the present division exists; the four records and the parent's are as in the file; two units of the new size fit\n");
+    puts_("checks passed: no unit of the present division exists; " DMM_RECS_TEXT "\n");
     return 0;
 }
 
@@ -1380,7 +1388,7 @@ static void level13(void)
     const u32 *volatile busy = dmm_busy_keys;
     const u32 *volatile fit = dmm_fit;
     u32 handle = 0;
-    puts_("== level "); putnum(LEVEL); puts_(": " VERB " the four memory-manager words of " DMM_DESIGN "\n");
+    puts_("== level "); putnum(LEVEL); puts_(": " VERB " " DMM_WORDS_TEXT " of " DMM_DESIGN "\n");
     l13_phys = cam_dmm_alloc(CP_PAGE, &handle);
     if (!l13_phys) { puts_("!! buffer allocation failed; nothing is written\n"); return; }
     if ((l13_phys & 0x3f) || l13_phys < RAM_LO || l13_phys + CP_PAGE > RAM_HI) {
@@ -1431,7 +1439,7 @@ static void level13(void)
             if (site_state(s) != 1) { say_site("site", s); puts_("!! does not hold the target bytes\n"); failed = 1; }
         }
     }
-    if (!failed) { puts_("DONE: all four sites hold the target bytes (" VERB ")\n"); goto out; }
+    if (!failed) { puts_("DONE: " DMM_DONE_TEXT " the target bytes (" VERB ")\n"); goto out; }
 
     puts_("undo: every site this run touched gets its earlier bytes back\n");
     int left = 0;

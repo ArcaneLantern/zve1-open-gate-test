@@ -1,5 +1,5 @@
 @echo off
-rem ZV-E1 (firmware 2.02): apply only the three open-gate steps, without the two screen steps.
+rem ZV-E1 (firmware 2.02): apply only the four open-gate steps (raw write buffer, sensor, output size, encoder), without the two screen steps.
 rem WRITES into the camera's memory (not firmware, not settings). A cold boot (battery out for 10 seconds) returns it to stock.
 cd /d "%~dp0"
 if not exist ".venv\Scripts\python.exe" (

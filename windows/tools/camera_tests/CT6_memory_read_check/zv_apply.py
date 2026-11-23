@@ -1,5 +1,6 @@
 """ZV-E1 firmware 2.02: apply, or put back, the open-gate state in the camera's MEMORY. (ZV-E1 port of the A7S III kit,
-2026-11-24; made from s3_apply.py. NOTHING OF IT HAS RUN ON A ZV-E1.)
+2026-11-24; made from s3_apply.py. Run once on a ZV-E1, 2026-11-23, without the raw write buffer step: every step applied, then the camera
+restarted on entering movie mode. This version adds that step, L13, first.)
 
   python zv_apply.py apply    [--no-screen] [--dry-run]
   python zv_apply.py putback  [--no-screen] [--dry-run]
@@ -9,14 +10,18 @@
 The A7S III's default state, ported: open gate with the screen steps. On an A7S III (2026-11-22) it records a true 3840x2560
 file of the whole sensor area at 23.98p. The ZV-E1 has the same sensor and the same drive modes; its screen is a 3:2 panel
 (the A7S III's is 4:3) and it has no viewfinder, so the screen steps are the A7 IV / A7C II kind. Everything is built from the
-ZV-E1's own files and emulated; nothing has run on a ZV-E1 (modding/ZVE1_PORT.md).
+ZV-E1's own files and emulated (modding/ZVE1_PORT.md).
 
-  apply    five steps, each its own USB session: L5 sensor side (ogsq_zv_v1), L16 output size (outsz2560_zv_v1),
+The first ZV-E1 test (2026-11-23) restarted the camera on entering movie mode: the camera core's raw write buffer is 4288 x 2408 bytes on the
+ZV-E1 (26,214,400 on the A7S III), too small for the full-height frame, so the first stage never started and the camera forced a restart
+(the A7 IV's F673). Step L13 gives that buffer the A7S III's size; it has to be written before movie mode is entered after a cold boot.
+
+  apply    six steps, each its own USB session: L13 raw write buffer size (dmmwb_zv_v1), L5 sensor side (ogsq_zv_v2), L16 output size (outsz2560_zv_v1),
            L19 encoder side (ogfile2560_hs_s_zv_v1), S16 rear screen shows the whole 3:2 picture with the focus frames
            (lcdfill_zv_v2), C19 the C2 key steps the preview 3:2 -> 2:1 -> 2.25:1 -> 2.4:1 in movie mode
-           (lcdcycle_zv_v1). Afterwards: XAVC HS 4K or XAVC S 4K at 23.98p only. With --no-screen only the first three.
+           (lcdcycle_zv_v1). Afterwards: XAVC HS 4K or XAVC S 4K at 23.98p only. With --no-screen only the first four.
            A step that finds its bytes already applied says NOTHING TO DO and counts as passed.
-  putback  the reverse: C20, S17, L20, L17, L6 (with --no-screen the last three). The screen part needs the preview
+  putback  the reverse: C20, S17, L20, L17, L6, L14 (with --no-screen the last four). The screen part needs the preview
            at 3:2: press C2 until it is. A cold boot (battery out for 10 seconds) also undoes everything.
   screen / screen-putback   only the two screen steps (S16, C19) or their put back (C20, S17).
 
@@ -48,7 +53,7 @@ import ct1_common as c  # noqa: E402
 import zv_run  # noqa: E402
 
 FIRMWARE = zv_run.FIRMWARE
-STEPS = {"apply": ("L5", "L16", "L19"), "putback": ("L20", "L17", "L6"), "screen": ("S16", "C19"), "screen-putback": ("C20", "S17")}
+STEPS = {"apply": ("L13", "L5", "L16", "L19"), "putback": ("L20", "L17", "L6", "L14"), "screen": ("S16", "C19"), "screen-putback": ("C20", "S17")}
 RUNNER = HERE / "zv_run.py"
 LISTER = HERE.parent / "CT1_usb_first_contact" / "ct1_stage2_service.py"
 
@@ -73,12 +78,12 @@ def sessions():
 def last_check():
     """The newest saved read-only check that fetched a result: (folder name, ready?) or None. A check that stopped before the camera
     answered (no driver yet, no camera seen, an old result on the RAM disk: all seen on the first A7S III run) says nothing and is skipped.
-    Only results of this kit's helper (zvread_v1) count."""
+    Only results of this kit's helper (zvread_v2: it also reads the raw write buffer's size) count."""
     for folder, man in sessions():
         res = man.get("results", {})
         f = (res.get("ct6", {}).get("result") or {}).get("s3")
         if res.get("which") in ("check", "dump") and f:       # a dump makes every check the check makes, and gives the same verdict
-            current = "zvread_v1 " in f.get("header", "")
+            current = "zvread_v2 " in f.get("header", "")
             return folder.name, current and bool(f.get("ready")) and not f.get("identity_differs")
     return None
 
@@ -139,10 +144,12 @@ def movie_session():
     say()
     say("=" * 78)
     say("One more session, and it only READS. On the A7S III it is what corrected the glitchy live view after the apply.")
-    say(">>> 1. Press the Still/Movie/S&Q button until the camera is in MOVIE mode (File Format XAVC HS 4K or XAVC S 4K, 24p).")
-    say(">>> 2. Unplug the USB cable. Look at the rear screen for five seconds and remember it: right, or glitchy?")
-    say(">>> 3. Plug the USB cable in again.")
+    say(">>> 1. Unplug the USB cable.")
+    say(">>> 2. Press the Still/Movie/S&Q button until the camera is in MOVIE mode (File Format XAVC HS 4K or XAVC S 4K, 24p).")
+    say(">>>    Look at the rear screen for five seconds and remember it: right, or glitchy?")
+    say(">>> 3. Plug the USB cable in again, still in MOVIE mode.")
     say(">>> Do NOT switch the camera off: on the A7S III the power switch removed the patch, and on the ZV-E1 it is not known.")
+    say("If the camera restarts by itself after step 2 (the first test did, without step L13): leave it on, stills mode, replug, and run dump_info.")
     say("Waiting for the unplug and the replug (Ctrl+C to stop; the patch stays applied either way) ...")
     if not wait_for_replug():
         say("The camera did not come back as a USB drive. The steps are applied all the same.")
@@ -162,7 +169,7 @@ def movie_session():
     column = ((f.get("decoded") or {}).get("sensor_registers") or {}).get("closest_column")
     if column != 1:                                  # the open-gate 4K 24p mode runs sensor register column 1
         say("NOTE: before this session the sensor was not in the open-gate 4K 24p mode (register column %s, not 1)." % column)
-        say("      Was the camera in movie mode, at 4K 24p? If not: set it, replug, and run dump_info once more.")
+        say("      Was the camera in movie mode, at 4K 24p, when you plugged it in? If not: unplug, switch to movie mode, replug, and run dump_info.")
     say(">>> Unplug USB now. The live view should be right.")
     say("    On the A7S III, coming back to movie mode from stills made it glitchy again (purple, lower part black) until a short")
     say("    recording was started and stopped. Please report whether the ZV-E1 does that.")
@@ -226,7 +233,8 @@ def main():
     say("so KEEP THE CAMERA SWITCHED ON from now until the script says it is finished.")
     if a.what == "apply":
         say("Before you go on: shooting mode stills, a charged battery, and a camera that was cold booted and has not been in movie mode since.")
-        say("(If the open-gate state is already applied in this power-on, its three steps will say NOTHING TO DO: that is fine.)")
+        say("(If the open-gate state is already applied in this power-on, its steps will say NOTHING TO DO: that is fine.)")
+        say("Step 1 refuses if a movie buffer is open (the camera was in movie mode since it was switched on): then pull the battery and start again.")
     else:
         say("Before you go on: a charged battery." + (" Press C2 until the rear screen is back at 3:2." if a.what != "screen" and with_screen else ""))
     if input("Firmware version in the camera's menu: ").strip() != FIRMWARE:
@@ -245,8 +253,18 @@ def main():
             cmd += ["--clear-result", clear]
         rc = subprocess.run(cmd).returncode
         which, f = step_outcome()
+        if k == "L14" and which == k and f and f.get("outcome") == "NOTHING WRITTEN":
+            say()
+            say("Step %d (L14) wrote nothing: a movie buffer is open. Every other step is put back; the raw write buffer keeps the larger size" % n)
+            say("(the A7S III's, which stock movie modes use as well) until the next cold boot (battery out for 10 seconds).")
+            continue
         if rc or which != k or not f or not f.get("ok"):
             say()
+            if k == "L13" and which == k and f and f.get("outcome") == "NOTHING WRITTEN":
+                say("STOPPED at step 1 (L13): nothing was written. Most likely a movie buffer is open (the camera was in movie mode since it was")
+                say("switched on). Pull the battery for 10 seconds, switch on in STILLS mode, do not go into movie mode, and run the apply again.")
+                say("If it stops here again, please send the newest folders in camera_private.")
+                raise SystemExit(1)
             say("STOPPED at step %d (%s): %s" % (n, k, "the session did not finish" if rc or which != k or not f else "outcome " + f["outcome"]))
             say("Steps before it are %s. To be sure of the camera's state: cold boot it (battery out for 10 seconds)." % ("applied" if applying else "put back"))
             say("Please send the newest folders in camera_private.")

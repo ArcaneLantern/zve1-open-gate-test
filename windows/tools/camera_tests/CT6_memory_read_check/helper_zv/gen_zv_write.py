@@ -5,12 +5,15 @@
 Made from helper_c2/gen_c2_write.py (the A7C II's: the same 0x170-byte stored record and appFw.so cave in .rela.dyn), with this build's
 files, addresses and designs (modding/ZVE1_PORT.md). The write levels of readcheck.c are used as they are; only their tables and a few
 constants differ (helper_zv/build_zv_write.sh passes those). This writes, into helper/, in gen_expected.py's formats:
-  expected_sites_ogsq_zv_v1.h              levels 5/6: 21 sensor/record sites and the changed bytes of the 0x170-byte stored record
+  expected_dmm_dmmwb_zv_v1.h               levels 13/14: the movie raw write buffer's size word, its unit record and the parent's records
+  expected_sites_ogsq_zv_v2.h              levels 5/6: 21 sensor/record sites and the changed bytes of the 0x170-byte stored record
   expected_words_outsz2560_zv_v1.h         levels 16/17: the output-size word and its guards
   expected_words_lcdfill_zv_v2.h           levels 16/17: the rear screen at 3:2 with the focus frames (fit word, two frame tables)
   expected_mp_ogfile2560_hs_s_zv_v1.h      levels 19/20: encoder-side sites in av-cam.bin and libmpr.so
   expected_mp_lcdcycle_zv_v1.h             levels 19/20: the C2 preview routine in appFw.so
-Every stock byte is compared with the 2.02 files here. No DMM step: the A7S III kit has none (the raw buffer held a full-height frame).
+Every stock byte is compared with the 2.02 files here.
+DMM step (levels 13/14, added after the first ZV-E1 test, 2026-11-23): the A7S III kit has none, because its raw write buffer holds a full-height
+frame; the ZV-E1's holds only the stock 4K stage (4288 x 2408), which restarted the camera. build/build_dmm_zv.py has the design.
 """
 import hashlib
 import json
@@ -24,6 +27,7 @@ ROOT = HERE.parents[2]
 EX = ROOT / "work/extracted/zve1_202/0700_part_image/dev"
 DES = ROOT / "modding/designs"
 sys.path.insert(0, str(ROOT / "build"))
+import parse_dmmcfg  # noqa: E402
 
 BASE = 0x108000
 IMAGE = (EX / "nflasha8/cpapp-b.bin").read_bytes()
@@ -66,6 +70,48 @@ def sites_header(name):
             "static const struct cp_site cp_sites[] = {"] + rows + ["};"]
     (OUT / f"expected_sites_{name}.h").write_text("\n".join(out) + "\n", encoding="utf8", newline="\n")
     return len(sites), len(offs), d["mode_id"]
+
+
+def dmm_header(name="dmmwb_zv_v1"):
+    """gen_c2_write.dmm_header for this body's one-word design: the size of the single key 0x57f record (group 0x89, parent key 0x38). No layout
+    is steered, so the header has one site, one record, the two records of the parent key 0x38, fit {size, 1} and the busy key 0x57f only."""
+    design = json.loads((DES / f"{name}.json").read_text(encoding="utf8"))
+    assert design["build"] == "zve1_202"
+    cfg = parse_dmmcfg.Config(parse_dmmcfg.find_file("zve1_202"), "zve1_202")
+    ram = lambda u: cfg.ram("unit_records", u["seq"] * 0x14)
+    by_ram = {ram(u): u for g in cfg.groups for u in g["units"]}
+    sites, recs = [], []
+    for st in design["sites"]:
+        a, old, new = int(st["ram_address"], 16), bytes.fromhex(st["old"]), bytes.fromhex(st["new"])
+        rec = next(r for r in by_ram if r <= a < r + 0x14)
+        u, off = by_ram[rec], a - rec
+        assert len(old) == len(new) == 4 and old != new and off == 12 and (a & 63) <= 60
+        assert u["key"] == 0x57F and u["group"]["gid"] == 0x89 and cfg.data[u["at"] + off:u["at"] + off + 4] == old
+        sites.append((a, old, new))
+        recs.append((rec, off, cfg.data[u["at"]:u["at"] + 0x14]))
+    new_size = design["summary"]["unit_size"]
+    assert len(sites) == 1 and sites[0][2] == new_size.to_bytes(4, "little") and new_size % 128 == 0
+    parents = [(ram(u), cfg.data[u["at"]:u["at"] + 0x14]) for u in cfg.units_by_key[0x38]]
+    assert len(parents) == 2 and all(u["size"] >= new_size for u in cfg.units_by_key[0x38])
+    assert [u["key"] for g in cfg.groups if g["gid"] == 0x89 for u in g["units"]] == [0x57F]
+    out = [HEAD % name,
+           "/* The memory manager's RAM copy of its unit records (cpapp-b.bin 2.02, 0x257b07c on): %d word in %d record. */" % (len(sites), len(recs)),
+           '#define DMM_DESIGN "%s"' % name,
+           "/* the new unit size, and how many units of it must fit the parent */",
+           "static const u32 dmm_fit[2] = { %dU, 1U };" % new_size,
+           "struct dmm_site { u32 address; u8 stock[4]; u8 changed[4]; };",
+           "static const struct dmm_site dmm_sites[] = {"]
+    out += ["    { 0x%x, { %s }, { %s } }," % (a, hx(old), hx(new)) for a, old, new in sites]
+    out += ["};", "/* the record each site lies in, as in the file: every byte but the site's four (from site_off) must equal these */",
+            "struct dmm_rec { u32 address; u32 site_off; u8 file[20]; };", "static const struct dmm_rec dmm_recs[] = {"]
+    out += ["    { 0x%x, %d, { %s } }," % (r, off, hx(b)) for r, off, b in recs]
+    out += ["};", "/* the records of the parent unit (key 0x38): all 20 bytes must equal the file's, and the size must hold a unit of the new size */",
+            "static const struct dmm_rec dmm_parents[] = {"]
+    out += ["    { 0x%x, 0xff, { %s } }," % (r, hx(b)) for r, b in parents]
+    out += ["};", "/* a unit object of this key in a division still in force: nothing is written */",
+            "static const u32 dmm_busy_keys[] = { 0x57f };"]
+    (OUT / f"expected_dmm_{name}.h").write_text("\n".join(out) + "\n", encoding="utf8", newline="\n")
+    return len(sites), [hex(r) for r, _ in parents]
 
 
 # Where a words design may have a site, and where only a guard (ZV-E1 addresses; build/build_ram_words_zv.py, modding/ZVE1_PORT_PART_A.md)
@@ -225,7 +271,8 @@ def mp_appfw_header(name="lcdcycle_zv_v1"):
 
 
 if __name__ == "__main__":
-    print("sites header ogsq_zv_v1", sites_header("ogsq_zv_v1"))
+    print("dmm header dmmwb_zv_v1", dmm_header())
+    print("sites header ogsq_zv_v2", sites_header("ogsq_zv_v2"))
     for n in ("outsz2560_zv_v1", "lcdfill_zv_v2"):
         print("words header", n, words_header(n))
     print("mp header ogfile2560_hs_s_zv_v1", mp_header("ogfile2560_hs_s_zv_v1"))

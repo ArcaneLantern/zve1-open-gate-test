@@ -36,15 +36,19 @@ import ct6_level1_run as R  # noqa: E402
 
 FIRMWARE, MODEL, BUILD = "2.02", "ZV-E1", "zve1_202"
 S3 = HERE / "helper_zv"                           # this kit's folder (the name S3 is kept: zv_apply.py and the Android app share s3_apply.py's code)
-PINS = {"check": ("libJit_zv_check.so", "e46a33186804f755b7914a532920448c7d5dec8ac6385cbdb5dacc48959290f7"),
-        "dump": ("libJit_zv_dump.so", "3bc78bd968c1b80f658950a9b78cbe683e2c2f21f6fc94aef8d5b70c6bba9125")}
+PINS = {"check": ("libJit_zv_check.so", "c25e08bf01dbd4e314d91a54aa39ec450c2326e43030df6c8277e73b57a508e0"),
+        "dump": ("libJit_zv_dump.so", "30aab4055212647723c26e8d5332e926fe73cb6898370aa28496799576996421")}
 LEVELS = {"check": 101, "dump": 102}              # numbers outside the A7 IV runner's own levels: none of its level-specific code runs
 # THE WRITE STEPS. Each is one library built from the A7 IV helper's write code with this camera's tables (helper_zv/build_zv_write.sh).
 # They change the running camera's memory until a cold boot. They are run through zv_apply.py, never by a launcher of the read-only kit,
 # and the libraries are not in the published kit unless it was published with --include-write.
 WRITE_STEPS = {
-    "L5": ("libJit_zv_L5.so", "b4683b591729a46757faf6a21422753758ac25d516f7b3ae2b1010ddf3d451f7", "apply the sensor-side design ogsq_zv_v1 (sensor cells, two records, the stored record)"),
-    "L6": ("libJit_zv_L6.so", "b31f9a8e95cc7fd9599b34658fc785c6c6149d2d2b76abf1d9aec4179d7e51bc", "put back the sensor-side design ogsq_zv_v1"),
+    # L13/L14 (added 2026-11-24 after the first ZV-E1 test, which restarted the camera on entering movie mode): the movie raw write buffer
+    # is 4288 x 2408 bytes on this body, too small for the full-height first stage; dmmwb_zv_v1 gives it the A7S III's size (build/build_dmm_zv.py)
+    "L13": ("libJit_zv_L13.so", "5f2d902a11d8b0030d3557a3235dd436deadedc1d6c214b87f9ac86ce86c1a8c", "apply the raw write buffer size dmmwb_zv_v1 (one word of the memory manager: 10,325,504 -> 26,214,400 bytes)"),
+    "L14": ("libJit_zv_L14.so", "af27650a021bdbdb3ae0270663c8cee21f0b8c302450ea8b87c041ea74bd28c9", "put back the raw write buffer size dmmwb_zv_v1"),
+    "L5": ("libJit_zv_L5.so", "5d419a3222f413b01a05c3dcf27f85c3cd2de16354f44d4feae79a084edfae47", "apply the sensor-side design ogsq_zv_v2 (sensor cells, two records, the stored record)"),
+    "L6": ("libJit_zv_L6.so", "0850515ead1d11214509974f30edc22889db23a6fa81cc4a67b236883f6dc9e6", "put back the sensor-side design ogsq_zv_v2"),
     "L16": ("libJit_zv_L16.so", "4261077b9c3b3b0534534d4926e4e38efdd05707b0b1a80959e18defc3d1e264", "apply the output size outsz2560_zv_v1 (one word)"),
     "L17": ("libJit_zv_L17.so", "8dbe4247edf49fbc3fdbc51a8bfdc6795212c83980469b5a8b9a8ec15de03c27", "put back the output size outsz2560_zv_v1"),
     "L19": ("libJit_zv_L19.so", "4341773dcfb1cb922379075ed2760f75e9443e7a9127f9ae80ddd5ebff895c26", "apply the encoder-side design ogfile2560_hs_s_zv_v1 (101 + 4 sites)"),
@@ -255,7 +259,7 @@ def run_helper(data):
     try:
         import emu_zv
     except Exception:
-        text = "zvread zvread_v1 %s for ZV-E1 2.02; read-only\n== file /proc/version\nLinux (simulated)\n\n== end 18 bytes\n== summary\nVERDICT READY (canned)\n== done\n" % WHICH
+        text = "zvread zvread_v2 %s for ZV-E1 2.02; read-only\n== file /proc/version\nLinux (simulated)\n\n== end 18 bytes\n== summary\nVERDICT READY (canned)\n== done\n" % WHICH
         return text.encode(), "canned"
     r, text = emu_zv.run(bytes(data))
     if r.bad:
@@ -416,7 +420,7 @@ def main():
     ap.add_argument("--remove-only", action="store_true")
     ap.add_argument("--clear-result", metavar="SHA256", help="first delete the result file of an earlier run from the RAM disk, only if its SHA-256 is this")
     ap.add_argument("--firmware-shown")
-    ap.add_argument("--writes-memory", action="store_true", help="needed for a write step (L5, L6, L16, L17, L19, L20, S16, S17, C19, C20): it changes the running camera's memory")
+    ap.add_argument("--writes-memory", action="store_true", help="needed for a write step (L13, L14, L5, L6, L16, L17, L19, L20, S16, S17, C19, C20): it changes the running camera's memory")
     a = ap.parse_args()
     if a.which in WRITE_STEPS and a.go and not (a.dry_run or a.selftest) and not a.writes_memory:
         raise SystemExit("%s is a write step: %s. It needs --writes-memory as well. Use zv_apply.py. Nothing was sent." % (a.which, WRITE_STEPS[a.which][2]))

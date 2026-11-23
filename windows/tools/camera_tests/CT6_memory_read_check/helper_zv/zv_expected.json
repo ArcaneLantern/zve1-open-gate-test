@@ -1,5 +1,5 @@
 {
- "label": "zvread_v1",
+ "label": "zvread_v2",
  "cp_lo": 786432,
  "cp_hi": 40894464,
  "avcam_phys": 17196646400,
@@ -195,6 +195,12 @@
    "address": "0xe9b49c",
    "length": 4,
    "soft": 0
+  },
+  {
+   "name": "rawbuf_size",
+   "address": "0x2580150",
+   "length": 4,
+   "soft": 0
   }
  ],
  "lm_sites": 4,
@@ -269,12 +275,23 @@
    "paneltype",
    "0x1a71000",
    1
+  ],
+  [
+   "dmmglobals",
+   "0x19cf000",
+   1
+  ],
+  [
+   "dmmrecs",
+   "0x2580000",
+   1
   ]
  ],
  "designs": {
-  "ogsq_zv_v1": "cc02f871eda30cbd3868aaaa49895a3ba2ee30db789957afc31532772ee9207b",
+  "ogsq_zv_v2": "6dfe9574ee0df78822ed8eb6b100e5de046065cefb2805eb61a8a1c57b0fcdbf",
   "outsz2560_zv_v1": "fab854c87eee0023f76b4529bee299d36184c23d75e6b3ab4c7c2b3882dcca16",
   "ogfile2560_hs_s_zv_v1": "d4797c237ac4196871b30a0f053f1638576ee47f118f799bf7cac54a5449256c",
-  "lcdfill_zv_v2": "62c8cd353bd4e7af96ac6f0d9e3d9c4e27bbe7375513926a9cb9501657878f9c"
+  "lcdfill_zv_v2": "62c8cd353bd4e7af96ac6f0d9e3d9c4e27bbe7375513926a9cb9501657878f9c",
+  "dmmwb_zv_v1": "9455275c7127c99ff174b08d3df3f84b1380507183c66ce3cd6989d35b9cd2b1"
  }
 }

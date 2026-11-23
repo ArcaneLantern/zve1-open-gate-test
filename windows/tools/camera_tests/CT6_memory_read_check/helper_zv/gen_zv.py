@@ -3,7 +3,9 @@
   work/venv/Scripts/python.exe -I -B gen_zv.py
 
 helper_s3/gen_s3.py with this build's files, designs and addresses (modding/ZVE1_PORT.md). Everything the helper compares against is
-taken here from the extracted 2.02 update and from modding/designs/{ogsq_zv_v1, outsz2560_zv_v1, ogfile2560_hs_s_zv_v1, lcdfill_zv_v2}.json.
+taken here from the extracted 2.02 update and from modding/designs/{ogsq_zv_v2, outsz2560_zv_v1, ogfile2560_hs_s_zv_v1, lcdfill_zv_v2,
+dmmwb_zv_v1}.json. zvread_v2 (2026-11-24, after the first camera test): the stored record's target is ogsq_zv_v2's, and the movie raw write
+buffer's size word (dmmwb_zv_v1, the memory manager's RAM copy of DmmCfg.bin) is a site, so that a check shows it stock or new.
 Also writes zv_expected.json (what the PC checks against) and zv_reference.json (what the PC needs to read a dump). Read-only on the inputs.
 """
 import hashlib
@@ -16,7 +18,7 @@ ROOT = HERE.parents[2]
 EX = ROOT / "work/extracted/zve1_202/0700_part_image/dev"
 DES = ROOT / "modding/designs"
 BASE = 0x108000
-LABEL = "zvread_v1"
+LABEL = "zvread_v2"
 CP_LO, CP_HI = 0xC0000, 0x2700000                     # coprocessor addresses a read may have: its logs (tomco.txt), image and RAM tables
 AVCAM_PHYS, AVCAM_RESERVE = 0x401000000, "@0x401000000"   # kemco.txt: memrsv=0x01000000@0x401000000:ex (byte-identical to the A7C II's)
 ID_FILES = {"/libmpr.so": "nflasha15/lib/libmpr.so", "/libsencore.so": "nflasha15/lib/libsencore.so", "/libJiritsu.so": "nflasha15/lib/libJiritsu.so"}
@@ -32,8 +34,10 @@ DUMP_RANGES = (("shadow", 0x11BD000, 2), ("matrix", 0x10CD000, 3), ("sizetable",
                ("context", 0x168B000, 4), ("resizework", 0x169D000, 1), ("resizestate", 0x19AC000, 4), ("wbuf", 0x10E1000, 2),
                # the screen (lcdfill_zv_v2): the VDF fit function and tables 0x1f5c34.. (fit word 0x1f5c88), the frame widgets' rectangle
                # tables 0xe9b3e0 / 0xe9b458, and the rear panel record 0x1a71824 (type byte 0x1a71840)
-               ("display", 0x1F5000, 1), ("frametab", 0xE9B000, 1), ("paneltype", 0x1A71000, 1))
-DESIGNS = ("ogsq_zv_v1", "outsz2560_zv_v1", "ogfile2560_hs_s_zv_v1", "lcdfill_zv_v2")
+               ("display", 0x1F5000, 1), ("frametab", 0xE9B000, 1), ("paneltype", 0x1A71000, 1),
+               # the memory manager (dmmwb_zv_v1): its page of pointers 0x19cf000 and the unit records around the write buffer's 0x2580144
+               ("dmmglobals", 0x19CF000, 1), ("dmmrecs", 0x2580000, 1))
+DESIGNS = ("ogsq_zv_v2", "outsz2560_zv_v1", "ogfile2560_hs_s_zv_v1", "lcdfill_zv_v2", "dmmwb_zv_v1")
 UNIT, CLIP, DESC, DSIZE = 0x38F848, 0x38D7EC, 0x38F8E8, 0x88           # av-cam.bin tables of this build (build_ogfile.py zve1_202)
 
 
@@ -45,7 +49,7 @@ def main():
     cp = (EX / "nflasha8/cpapp-b.bin").read_bytes()
     av = (EX / "nflasha3/av-cam.bin").read_bytes()
     lm = (EX / "nflasha15/lib/libmpr.so").read_bytes()
-    og, oz, fl, lf = (json.loads((DES / f"{n}.json").read_text(encoding="utf8")) for n in DESIGNS)
+    og, oz, fl, lf, dm = (json.loads((DES / f"{n}.json").read_text(encoding="utf8")) for n in DESIGNS)
     assert og["artifact_sha256"] == hashlib.sha256(cp).hexdigest() == lf["artifact_sha256"]
     assert fl["artifact_sha256"] == {"libmpr.so": hashlib.sha256(lm).hexdigest(), "av-cam.bin": hashlib.sha256(av).hexdigest()}
     out, blobs = [], []
@@ -79,6 +83,8 @@ def main():
         a, old = int(s["ram_address"], 16), bytes.fromhex(s["old"])
         assert cp[a - BASE:a - BASE + 4] == old
         sites.append((f"screen{k}", a, old, bytes.fromhex(s["new"]), 0))
+    for s in dm["sites"]:                                 # the memory manager's RAM copy is filled from DmmCfg.bin at start-up: not soft
+        sites.append(("rawbuf_size", int(s["ram_address"], 16), bytes.fromhex(s["old"]), bytes.fromhex(s["new"]), 0))
     pages = {a & ~0xFFF for _, a, o, _, _ in sites for a in (a, a + len(o) - 1) if a < BASE + len(cp)}
     assert not any(p in pages for p in ID_PAGES), "an identity page holds a design site"
     rows = [f"    {{{a:#x}, {c_bytes(hashlib.sha256(cp[a - BASE:a - BASE + 4096]).digest())}}}," for a in ID_PAGES]
@@ -119,7 +125,7 @@ def main():
              "id_pages": {hex(a): hashlib.sha256(cp[a - BASE:a - BASE + 4096]).hexdigest() for a in ID_PAGES},
              "cp_sites": [{"name": n, "address": hex(a), "length": len(o), "soft": s} for n, a, o, _, s in sites],
              "lm_sites": len(lmr), "av_sites": len(avr), "av_guards": [g[0] for g in guards], "dump_ranges": [[n, hex(a), k] for n, a, k in DUMP_RANGES],
-             "designs": {d["design"]: hashlib.sha256((DES / (d["design"] + ".json")).read_bytes()).hexdigest() for d in (og, oz, fl, lf)}}
+             "designs": {d["design"]: hashlib.sha256((DES / (d["design"] + ".json")).read_bytes()).hexdigest() for d in (og, oz, fl, lf, dm)}}
     (HERE / "zv_expected.json").write_text(json.dumps(facts, indent=1) + "\n", encoding="utf8", newline="\n")
     M, CM, IDS, RECS, REC, N = 0x10CDAF0, 0xDCDD00, 0xDCC524, 0x25D9FA4, 0x170, 39
     matrix, k = [], 0
@@ -137,7 +143,9 @@ def main():
            "ram": {"scaler_block": "0x19ad08c", "scaler_block_predicted": True, "scaler_input": "0x19ad0c8", "scaler_input_predicted": True,
                    "resize_work": "0x169de80", "resize_settings": "0x19aec20", "division_units": "0x19ad4d8", "core_log": "0x19adcb8",
                    "fit_word": "0x1f5c88", "fit_table": "0x1f5c74", "frame_tables": ["0xe9b3e0", "0xe9b458"], "panel_type": "0x1a71840"},
-           "screen_design": {s["ram_address"]: [s["old"], s["new"]] for s in lf["sites"]}}
+           "screen_design": {s["ram_address"]: [s["old"], s["new"]] for s in lf["sites"]},
+           "raw_write_buffer": {"size_word": dm["sites"][0]["ram_address"], "stock": dm["summary"]["stock_unit_size"], "design": dm["summary"]["unit_size"],
+                                "full_height_stage_needs": 4288 * 2848}}
     assert len(matrix) == 499 and len(ref["emulated_stock_records"]) == N
     (HERE / "zv_reference.json").write_text(json.dumps(ref) + "\n", encoding="utf8", newline="\n")
     print(f"zv_expected.h: {len(sites)} coprocessor sites, {len(lmr)} libmpr sites, {len(avr)} av-cam sites, {len(text)} bytes of header")

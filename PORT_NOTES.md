@@ -1,6 +1,49 @@
 # Port notes: A7S III 5.01 kit → ZV-E1 2.02
 
-Everything here was read from the ZV-E1 2.02 firmware update. The firmware decrypts with the public key the A7 IV, A7C II and A1 II use: 1,446 files, and all 93 checksums are valid. **Nothing has run on a ZV-E1.** Each step of the kit was emulated: Unicorn ran the ZV-E1's own code where it mattered, and the built helper libraries against a model camera.
+Everything here was read from the ZV-E1 2.02 firmware update. The firmware decrypts with the public key the A7 IV, A7C II and A1 II use: 1,446 files, and all 93 checksums are valid. Each step of the kit was emulated: Unicorn ran the ZV-E1's own code where it mattered, and the built helper libraries against a model camera. **The first version ran once on a ZV-E1 (2026-11-23) and restarted the camera when movie mode started. This version fixes that; it has not run yet.**
+
+## The first test, and what it showed (2026-11-23)
+
+The tester ran the five-step apply on macOS. Every site was written and read back, and the closing dump (taken in stills mode) read TARGET everywhere. On the switch to movie mode the camera restarted, and the patch was gone.
+
+**The coprocessor's account.** Its kprint log at 0xE0000 survives a restart without power loss, and the dump taken after the restart holds it:
+
+```text
+Snapshot Debug Image Saved
+pc: 0x004b2d86  lr: 0x004b2d79  r0: 0x00000000
+Running Task: CAM_VD_SEQUENCE (tid:0x000000a0), cpu 3
+cause: 4(data abort)  translation fault, page (DFSR: 0x00000807, DFAR: 0x00000000)
+```
+
+`0x4b2d86` is `str r0, [r0]` with r0 = 0, a deliberate stop. A counter at 0x19acf78 reached 11, and the routine first logs "FW: S-Ele Refresh ng force exception". This is the A7 IV's signature for the same failure (its F525/F667): the Dev stage was still waiting at its sync point frame after frame, because the first stage never started.
+
+The "time 493, drive mode 0x8c0" record the tester quoted is from the boot after the restart: the camera came back in movie mode, stock.
+
+**The cause: the raw write buffer.** In movie mode the camera core writes each raw frame into one unit of memory id 0x43e (the dump's movie size table names it for 3840 × 2160). Its port set-up (0x2613a8) refuses a frame larger than the unit: it logs `CamCore: AIF%d out[0x%x] > memsize[0x%x]` and reports no error. The required size is ((step + 1) × (rows − 1) + 1) × pitch.
+
+| | ZV-E1 2.02 | A7S III 5.01 |
+|---|---|---|
+| unit of key 0x57f (id 0x43e) | **10,325,504 = 4288 × 2408**: the stock 4K first stage (2392 + 16 rows) | 26,214,400 |
+| its layout | alone in group 0x89 of a 28,311,552-byte parent (key 0x38), limit 7 | alone in group 0x87 of the same parent, limit 6 |
+| full-height first stage | 4288 × 2848 = 12,212,224: does not fit | fits |
+
+So the full-height stage never started on the ZV-E1. On the A7S III, the same design works because that unit is 2.5 times larger. Every other memory-manager unit tied to the stage height is the same on both bodies.
+
+**The fix, step L13 (`dmmwb_zv_v1`).**
+
+- **What it writes:** one word of the memory manager's RAM copy of `/cp/DmmCfg.bin`, the size of that unit record at 0x2580150. It goes from 10,325,504 to the A7S III's 26,214,400.
+- **Checked in the ZV-E1's own allocator code** (the A7C II's DMM module at −0x1f738, run in Unicorn; `build/build_dmm_zv.py`):
+  - seven opens return the new size at the same addresses as stock, and an eighth is refused, as on stock;
+  - the parent's other users (ids 0x4b7, 0x4b8) still open;
+  - everything frees.
+- **Its code is the A7 IV helper's level 13** (`dmmwb4688_v1`, which works on the A7 IV), with this body's addresses: pointers page 0x19cf000, workspace +0x8f0, unit objects +0x444. It writes nothing:
+  - if a unit of key 0x57f is in a division still in force (movie mode entered since power-on);
+  - if the record or its parent's records are not as in the file;
+  - if the workspace pointers are not as expected.
+
+**Also fixed, step L5 (`ogsq_zv_v2`).** v1 left two bytes of the stored record at their stock values: +0x129 and +0x15e, the A7S III's run-time bytes moved by 4 (a guess). On this body they are calculator output. So v1's record held +0x128 = 0x47b1: half stock (0x47ea), half calculated (0x45b1). It also held +0x15e = 47 where the calculator gives 49. The three dumps show the camera's real run-time bytes: +0x11a/+0x11b (0x80, 0x80), which no design changes. v2 writes the whole calculated record, 70 bytes. Whether the two stale bytes alone would have mattered is not known; the buffer stops the camera before they would be used.
+
+**Ruled out.** The read-out table's frame-length fields, which the A7S III design changes: on the ZV-E1 the table has none, and the record field is 0 for every mode. The class table is the same on both bodies. The geometry row's extra field (+8, 418) stays open; it differs between 0x8c0 and 0x28c0, so it may be timing-related.
 
 ## What the ZV-E1 shares with the A7S III, and with the A7C II
 
@@ -15,7 +58,7 @@ Everything here was read from the ZV-E1 2.02 firmware update. The firmware decry
   - The parameter object is at +0x4ec, with the configuration at +0x54c.
 - **USB service route.** `libsencore.so` holds the A7 IV/A7S III login keys (at 0x59a50, 0x59c50, 0x59e50) and the same file commands. `DeviceInfo.xml` is byte-identical to the A7 IV's, the A7S III's and the A7C II's. So the known-answer read cannot tell the bodies apart; the helper itself checks which camera it is on (identity hashes of three libraries and four code pages).
 
-## Sensor side: `ogsq_zv_v1` (the A7S III's `ogsq_s3_v5`)
+## Sensor side: `ogsq_zv_v2` (the A7S III's `ogsq_s3_v5`; v1 differs only in two stored-record bytes)
 
 | Item | A7S III 5.01 | ZV-E1 2.02 |
 |---|---|---|
@@ -49,7 +92,7 @@ Found through the code that builds each address: `build/port_addr.py` (new) and 
 - The result has the same scaler numbers as the A7S III's working v5: Lrc 2180 × 2848 → 2176 × 2408, final 2144 + 2096 × 2392.
 - Then the v5 link-format words for a 12-bit link. The rule holds on all 38 ZV-E1 records.
 
-**Stored record.** The ZV-E1's own calculator (0x390fa0) was run with every cell applied: 68 bytes differ, and +6/+7 carry the sampling ratio 16/19. Two bytes are left alone: the A7S III camera's run-time bytes, moved by 4 past +0x1c. **That is a guess.** If the camera holds other values there, step 1 refuses and writes nothing.
+**Stored record.** The ZV-E1's own calculator (0x390fa0) was run with every cell applied. In v2, 70 bytes differ, and +6/+7 carry the sampling ratio 16/19. v1 left out two bytes (a guess; see above). If the camera holds other values in those bytes, step L5 refuses and writes nothing.
 
 ## Output size: `outsz2560_zv_v1`
 
@@ -87,21 +130,23 @@ The rear screen is 3.0-type, 1,036,800 dots = 720 × 480 = **3:2**, and there is
   - An A7S III image is refused.
   - Without the av-cam reservation, av-cam.bin is not read.
   - With an existing result, the helper does nothing.
-- Write libraries: 33 cases. Apply, apply again, put back byte for byte, foreign bytes, a wrong guard, lost writes undone, the C2 hook written last and removed first.
+- Write libraries: 45 cases. Apply, apply again, put back byte for byte, foreign bytes, a wrong guard, lost writes undone, the C2 hook written last and removed first. L13/L14 on the memory manager's state as the ZV-E1's own DMM code leaves it: the word written, then the same code hands out 26,214,400-byte buffers; refused while a movie buffer is open; refused with a record, a parent record or the workspace pointer not as expected.
 - Every launcher: `--selftest` and `--dry-run`.
 - The Android app's Python side, on the kit's simulated camera:
   - check;
-  - the five-step apply and closing session;
+  - the six-step apply and closing session;
   - put back;
   - a cancelled dialog;
   - Stop waiting.
 
 ## Not known until a ZV-E1 runs it
 
+- Whether the full-height first stage runs once the buffer holds it (the A7S III's does, with this buffer size).
 - Everything the A7S III kit left open: the live-view fault when movie mode is entered from stills, exposure and autofocus, and 60p.
 - Whether receiver type 6 (the ZV-E1's 4K) behaves like the A7S III's 5 when replaced.
-- The geometry row's extra field, and the stored record's run-time bytes.
+- The geometry row's extra field.
 - Whether the power switch removes the patch on this body.
-- The rear panel's type byte (expected 3).
+
+Known from the first test: every site holds the stock bytes the files predict; the rear panel's type byte is 3 (3:2); the stored record's run-time bytes are +0x11a/+0x11b; a restart does not keep the patch.
 - The physical C2 key's event.
 - The live-view and preview behaviour of the AI-unit body.

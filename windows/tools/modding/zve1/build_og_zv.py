@@ -1,6 +1,10 @@
-"""Build the ZV-E1 2.02 coprocessor design `ogsq_zv_v1`: the A7S III's proven `ogsq_s3_v5`, ported (2026-11-24).
+"""Build the ZV-E1 2.02 coprocessor design `ogsq_zv_v2` (or `ogsq_zv_v1`): the A7S III's proven `ogsq_s3_v5`, ported (2026-11-24).
 
-  C:/Python313/python.exe -B build/build_og_zv.py [--name ogsq_zv_v1]
+  C:/Python313/python.exe -B build/build_og_zv.py [--name ogsq_zv_v2]          (--name ogsq_zv_v1 rebuilds v1, with its guessed run-time bytes)
+
+v2 (after the first camera test, 2026-11-23) differs from v1 in the stored record only: v1 left two calculated bytes stock (+0x129, +0x15e, from
+a guessed list of run-time bytes); v2 holds every calculated byte, and the camera's own run-time bytes (+0x11a/+0x11b) are not touched. The
+restart of that test came from the raw write buffer (build/build_dmm_zv.py, design dmmwb_zv_v1), which v2 needs applied first.
 
 The ZV-E1 has the A7S III's IMX510 sensor and drive-mode list (39 modes: the A7S III's 40 without 0x8010; 0x8c0 is still index 12,
 0xe011 moves from index 37 to 36) on the A7C II's platform generation. ogsq_s3_v5 is what works on an A7S III (2026-11-22): drive mode
@@ -50,8 +54,13 @@ STILL = {"L": 0xD4264C, "R": 0xD43204}
 PACKER = {"CamArc": 0x267F48, "CamNrs": 0x7885CC, "CamSig": 0x7904E0, "CamLrc": 0x788588, "Dev (first packer)": 0x787AE8,
           "Dev (second packer)": 0x78796E, G.BEYOND: 0x787AE8}
 LOG, FIT = 0xB268AC, 0x790040
-# A7S III run-time bytes of the 0x15c record (seen in four camera dumps), moved to the 0x170 layout (a 4-byte field at +0x1c, as the A7C II)
-RUNTIME = {o if o < 0x1C else o + 4 for o in V3.RUNTIME}
+# v1 (a guess): the A7S III's run-time bytes of the 0x15c record, moved to the 0x170 layout (a 4-byte field at +0x1c, as the A7C II). Two of them,
+# +0x129 and +0x15e, are calculator output on this body: v1 left them stock, so its record held +0x128 = 0x47b1 (stock 0x47ea, calculated 0x45b1)
+# and +0x15e = 47 (calculated 49).
+RUNTIME_V1 = {o if o < 0x1C else o + 4 for o in V3.RUNTIME}
+# v2: what a ZV-E1 showed (first test, 2026-11-23: three dumps, before the apply, after it and after the restart): only +0x11a/+0x11b of the 0x8c0
+# record differ from the calculator's (0x80, 0x80 on the camera; 0 in the emulation). Neither is a byte the design changes.
+RUNTIME = {0x11A, 0x11B}
 
 
 def configure():
@@ -131,7 +140,8 @@ def link12(rec):
 
 def main():
     v = sys.argv[1:]
-    name = v[v.index("--name") + 1] if "--name" in v else "ogsq_zv_v1"
+    name = v[v.index("--name") + 1] if "--name" in v else "ogsq_zv_v2"
+    runtime = RUNTIME_V1 if name == "ogsq_zv_v1" else RUNTIME
     configure()
     img = V.image()
     sha = hashlib.sha256(img).hexdigest()
@@ -153,10 +163,10 @@ def main():
     d_rec = bytearray(n_rec)
     d_rec[6], d_rec[7] = 16, 19
     diff = [o for o in range(len(s_rec)) if s_rec[o] != d_rec[o]]
-    held = [o for o in diff if o in RUNTIME]
+    held = [o for o in diff if o in runtime]
     for o in held:
         d_rec[o] = s_rec[o]
-    diff = [o for o in diff if o not in RUNTIME]
+    diff = [o for o in diff if o not in runtime]
     src = stock[0xE011][1]
     vs_src = [o for o in range(len(s_rec)) if d_rec[o] != src[o]]
     g = lambda h, o: struct.unpack_from("<H", rec[h], o)[0]
@@ -189,6 +199,15 @@ def main():
                        "receiver type 6 (the ZV-E1's 4K rows; 5 on the A7S III) behaves like 5 when replaced by 0, 2"],
            "not_shown": ["anything on a ZV-E1", "the raw write buffer's room for a full-height frame on this body",
                          "the live-view fault of the A7S III (glitchy live view when movie mode is entered from stills) on this body"]}
+    if name != "ogsq_zv_v1":
+        out["status"] = "built from the firmware files and emulated in parts; v1 was run on a ZV-E1 (2026-11-23): every site applied, then a restart on entering movie mode"
+        out["requires"] = {"dmmwb_zv_v1": "applied first: without it the 2848-row first stage does not fit the raw write buffer (4288 x 2408 on this body) and "
+                                          "the camera core never starts it; that restarted the camera in the v1 test (build/build_dmm_zv.py)"}
+        out["changes_from_v1"] = ["stored record: +0x129 and +0x15e hold the calculated values (v1 kept them stock: +0x128 read 0x47b1, half stock, half new)",
+                                  "the run-time bytes left alone are the camera's own, +0x11a/+0x11b (seen in three ZV-E1 dumps), which the design does not change"]
+        out["guesses"] = [g for g in out["guesses"] if "run-time bytes" not in g]
+        out["not_shown"] = ["a ZV-E1 picture in movie mode with this design (v1 restarted the camera before any picture: raw write buffer)",
+                            "the live-view fault of the A7S III (glitchy live view when movie mode is entered from stills) on this body"]
     dst = ROOT / "modding" / "designs" / f"{name}.json"
     dst.write_text(json.dumps(out, indent=1) + "\n", encoding="utf8", newline="\n")
     print(f"{name}: {len(cs)} sensor cells + 2 records = {len(patches)} sites, {out['summary']['bytes']} bytes")
