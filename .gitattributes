@@ -1,0 +1,4 @@
+# Written by the publish script. Git must store every file byte for byte: no line-ending conversion.
+# The known-answer file DeviceInfo.xml is compared with the camera's copy; with core.autocrlf on, git stored it with LF
+# (492 bytes, the camera returns 517) and every download from GitHub stopped at step 1 (2026-11-21).
+* -text
