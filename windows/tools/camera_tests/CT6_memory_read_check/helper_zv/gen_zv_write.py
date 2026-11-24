@@ -10,6 +10,8 @@ constants differ (helper_zv/build_zv_write.sh passes those). This writes, into h
   expected_words_outsz2560_zv_v1.h         levels 16/17: the output-size word and its guards
   expected_words_lcdfill_zv_v2.h           levels 16/17: the rear screen at 3:2 with the focus frames (fit word, two frame tables)
   expected_mp_ogfile2560_hs_s_zv_v1.h      levels 19/20: encoder-side sites in av-cam.bin and libmpr.so
+  expected_mp_ogfile2560_hs_s_zv_v2.h      levels 19/20: the same plus the MP4 header height, two libmpr.so instructions (as the A7 IV's
+                                           ogfile2560_hs_s_v2: each guarded by the two instructions before it and the two after it)
   expected_mp_lcdcycle_zv_v1.h             levels 19/20: the C2 preview routine in appFw.so
 Every stock byte is compared with the 2.02 files here.
 DMM step (levels 13/14, added after the first ZV-E1 test, 2026-11-23): the A7S III kit has none, because its raw write buffer holds a full-height
@@ -167,7 +169,10 @@ def mp_header(name):
     av, lm = (EX / "nflasha3/av-cam.bin").read_bytes(), (EX / "nflasha15/lib/libmpr.so").read_bytes()
     assert d.get("build") == "zve1_202"
     assert d["artifact_sha256"] == {"libmpr.so": hashlib.sha256(lm).hexdigest(), "av-cam.bin": hashlib.sha256(av).hexdigest()}
-    assert not any(p["code"] for p in d["patches"]), "not a data-only design"
+    # Code sites (ogfile2560_hs_s_zv_v2, as the A7 IV's ogfile2560_hs_s_v2): single libmpr.so instructions only; the data sites are as before.
+    code = {int(p["file_off"], 16) for p in d["patches"] if p["code"]}
+    assert all(p["binary"] == "libmpr.so" and len(p["old"]) == 8 and int(p["file_off"], 16) % 4 == 0 for p in d["patches"] if p["code"]), \
+        "a code site that is not one libmpr.so instruction"
     tabs = {"av-cam.bin": [], "libmpr.so": []}
     for p in d["patches"]:
         off, old, new = int(p["file_off"], 16), bytes.fromhex(p["old"]), bytes.fromhex(p["new"])
@@ -181,6 +186,9 @@ def mp_header(name):
         g_av.append((o, av[o:o + 4]))
     g_lm = [(0, lm[:16])]
     for off, _, old, new in tabs["libmpr.so"]:
+        if off in code:                                          # an instruction: the guards are the two instructions before it and the two after it
+            g_lm += [(off + k, lm[off + k:off + k + 4]) for k in (-8, -4, 4, 8)]
+            continue
         if len(old) == 4:                                        # a site that is the row's whole raster (width and height): the guard is the codec before it
             assert (off - 4 - COMB) % 0x18 == 0 and struct.unpack("<HH", old) == (3840, 2160)
             g_lm.append((off - 4, lm[off - 4:off]))
@@ -276,4 +284,5 @@ if __name__ == "__main__":
     for n in ("outsz2560_zv_v1", "lcdfill_zv_v2"):
         print("words header", n, words_header(n))
     print("mp header ogfile2560_hs_s_zv_v1", mp_header("ogfile2560_hs_s_zv_v1"))
+    print("mp header ogfile2560_hs_s_zv_v2", mp_header("ogfile2560_hs_s_zv_v2"))
     print("mp header, C2 routine:", mp_appfw_header())
