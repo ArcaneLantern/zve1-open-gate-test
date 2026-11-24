@@ -42,10 +42,11 @@ memory. A cold boot (battery out for 10 seconds) removes it. The camera must sta
 
 The MP4 header height (M19, the A7 IV's ogfile2560_hs_s_v2 on this body): the file's tkhd, its stsd entry and Sony's PROF box say 3840x2560, so
 editors open it at 3:2 without a remux. Sony's XML (M01.XML beside the file, and the one inside it) still says 3840x2160 16:9. The two
-instructions are in libmpr.so in the camera's main process. On a ZV-E1 (2026-11-24) the power switch, without a battery pull, removed the
-open-gate state but the header height stayed: 16:9 clips recorded after it were labelled 3840x2560. After the power switch: battery out for
-10 seconds. Putback (M20 puts the header height back whatever state the other steps are in) or the apply run again should also do;
-neither has been tried after a power switch.
+instructions are in libmpr.so in the camera's main process. On a ZV-E1 (2026-11-24) the power switch, without a battery pull, left a mixed
+state: every coprocessor site read stock, the av-cam.bin and libmpr.so sites applied. One 4K 24p clip in that state was a 3840x2560 file with
+the 16:9 picture letterboxed (200 black rows above and below) and 3840x2560 in its headers; 60p crashed the camera. After the power switch:
+battery out for 10 seconds. Putback clears the encoder side in the same power-on (tried); after a power switch neither putback nor a second
+apply has been tried.
 """
 import argparse
 import json
@@ -156,7 +157,7 @@ def movie_session():
     say(">>> 2. Press the Still/Movie/S&Q button until the camera is in MOVIE mode (File Format XAVC HS 4K or XAVC S 4K, 24p).")
     say(">>>    Look at the rear screen for five seconds and remember it: right, or glitchy?")
     say(">>> 3. Plug the USB cable in again, still in MOVIE mode.")
-    say(">>> Do NOT switch the camera off: the power switch removes the open-gate state (the MP4 header height stays).")
+    say(">>> Do NOT switch the camera off: the power switch puts back only part of the state (the encoder side stays).")
     say("If the camera restarts by itself after step 2 (the first test did, without step L13): leave it on, stills mode, replug, and run dump_info.")
     say("Waiting for the unplug and the replug (Ctrl+C to stop; the patch stays applied either way) ...")
     if not wait_for_replug():
@@ -236,15 +237,14 @@ def main():
     say()
     say("This WRITES into the running camera's memory (not its firmware, not its settings).")
     if applying:
-        say("The open-gate steps have run on one ZV-E1 (2.02, 2026-11-24: 3840x2560 at 24p). The MP4 header step M19 has not run in this form:")
-        say("the same two writes, made by a separate helper, gave files that DaVinci Resolve opens at 3840x2560. If anything is not as")
-        say("described: battery out for 10 seconds returns the camera to stock.")
+        say("These steps have run on one ZV-E1 (2.02, 2026-11-24: 3840x2560 at 24p in XAVC HS 4K, with the MP4 headers saying 3840x2560).")
+        say("If anything is not as described: battery out for 10 seconds returns the camera to stock.")
         if with_screen:
             say("If screen steps of an earlier kit are still in the camera's memory: pull the battery first.")
     else:
         say("It has to follow an apply of this kit.")
-    say("A cold boot (battery out for 10 seconds) returns the camera to stock. The power switch removes only part of it (the open-gate state, not")
-    say("the MP4 header height): so KEEP THE CAMERA SWITCHED ON from now until the script says it is finished.")
+    say("A cold boot (battery out for 10 seconds) returns the camera to stock. The power switch puts back only part of it (the encoder side")
+    say("stays): so KEEP THE CAMERA SWITCHED ON from now until the script says it is finished.")
     if a.what == "apply":
         say("Before you go on: shooting mode stills, a charged battery, and a camera that was cold booted and has not been in movie mode since.")
         say("(If the open-gate state is already applied in this power-on, its steps will say NOTHING TO DO: that is fine.)")
@@ -302,9 +302,9 @@ def main():
         say("Use only XAVC HS 4K or XAVC S 4K at 24p (23.98p) while it is applied: 60p gives a garbage live view and recording at 60p crashed the camera.")
         if "M19" in steps:
             say("The MP4 headers say 3840x2560 (editors open the file at 3:2 without a remux); Sony's XML in and beside the file still says 3840x2160 16:9.")
-            say("After the POWER SWITCH (no battery pull) open gate is gone but the header height stays: 16:9 clips are then labelled 3840x2560.")
-            say("So after switching off and on: battery out for 10 seconds. (open_gate_putback, or this apply run again, should also do; neither is")
-            say("tried yet after a power switch.)")
+            say("After the POWER SWITCH (no battery pull) the sensor side was stock but the encoder side and the header height stayed at 2560:")
+            say("a 4K clip then came out 3840x2560 with the 16:9 picture letterboxed, and 60p crashed the camera. So after switching off and on:")
+            say("battery out for 10 seconds before recording. (open_gate_putback is tried only without a power switch in between.)")
         say("If the camera stops or restarts: do NOT pull the battery yet. Shooting mode stills, replug USB and run dump_info, then send camera_private.")
         say("To return to stock: battery out for 10 seconds.")
 

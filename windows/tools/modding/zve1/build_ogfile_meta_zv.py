@@ -82,8 +82,9 @@ def main():
             v2[key] = [x for x in val if "container" not in x] + [
                 "the MP4 headers (tkhd, the stsd entry, Sony's PROF box) say 3840 by 2560 for every 3840-wide AVC or HEVC recording, whatever the "
                 "frame rate; Sony's XML (the M01.XML beside the file and the one inside it) still says 3840 by 2160, 16:9",
-                "the two libmpr.so instructions stay changed until a cold boot or the put back, also if the open-gate state itself is gone: "
-                "a 16:9 recording then has 2560 in its headers"]
+                "the encoder side (av-cam.bin, libmpr.so, these two instructions included) stays until a cold boot or the put back; after a "
+                "power switch on a ZV-E1 the coprocessor sites read stock and these applied, and a 4K clip came out 3840 by 2560 with the 16:9 "
+                "picture letterboxed and its headers saying 3840 by 2560"]
         elif key == "patches":
             v2[key] = val + patches
     v2["changes_from_v1"] = ["the two optional_sites of v1 (MP4 track height, 0x207d8c and 0x207dd8) are sites, as in the A7 IV's ogfile2560_hs_s_v2; "

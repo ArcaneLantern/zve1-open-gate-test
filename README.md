@@ -4,9 +4,9 @@
 
 The kit records a true 3840 × 2560 (3:2) file of the whole sensor area in XAVC HS 4K and XAVC S 4K at 23.98p. It also shows the live view at 3:2 on the rear screen and adds an anamorphic preview on the C2 key.
 
-**MP4 headers (since 2026-11-24): no remux needed.** The encoder step now also sets the height in the MP4 headers (tkhd, the stsd entry and Sony's PROF box) to 2560, as `ogfile2560_hs_s_v2` does on the A7 IV, so DaVinci Resolve opens the file at 3840 × 2560 as it comes off the card. Sony's own XML (the `M01.XML` file next to the clip, and the XML inside the clip) still says 3840 × 2160, 16:9; Catalyst Browse and Gyroflow read that. `--no-meta` gives the earlier encoder step, with 3840 × 2160 in the headers.
+**MP4 headers (since 2026-11-24): no remux needed.** The encoder step now also sets the height in the MP4 headers (tkhd, the stsd entry and Sony's PROF box) to 2560, as `ogfile2560_hs_s_v2` does on the A7 IV, so the file says 3840 × 2560 as it comes off the card and editors show it at 3:2. Sony's own XML (the `M01.XML` file next to the clip, and the XML inside the clip) still says 3840 × 2160, 16:9 (`HEVC_3840_2160`); Catalyst Browse and Gyroflow read that. `--no-meta` gives the earlier encoder step, with 3840 × 2160 in the headers.
 
-**The power switch is not a full reset on this body.** Switching off and on (without pulling the battery) removes the open-gate state, but the MP4 header height stays in memory: 16:9 clips recorded after that are labelled 3840 × 2560, and an editor that trusts the headers shows them at the wrong size. Pull the battery for 10 seconds before you record 16:9 again.
+**The power switch is not a full reset on this body.** After switching off for a few seconds and on again (battery in), `check_readonly` read every coprocessor site as stock (sensor, output size, screen, raw write buffer) but the encoder side as still applied (all 101 av-cam.bin sites and the four libmpr.so rows; the check does not read the two header instructions). A 4K 24p clip recorded in that state was a 3840 × 2560 file with the 16:9 picture in the middle and exactly 200 black rows above and below; its headers said 3840 × 2560, which matches the stream. That is one clip, so take it as what was seen, not as a rule. `open_gate_putback` (in the same power-on) or a battery pull clears the encoder side; see below.
 
 **Why it should carry over:** the ZV-E1 has the A7S III's sensor (IMX510) and the same list of sensor modes, less one. The 4K mode and the full-height mode the patch borrows have the same table values as on the A7S III, except for a few documented differences (see `PORT_NOTES.md`). The picture records were rebuilt with the same model, and the scaler numbers come out the same as the A7S III's working version. The USB service route uses the same commands and login.
 
@@ -39,17 +39,18 @@ One ZV-E1, firmware 2.02, macOS, kit version 2 (`8feaae7`): `check_readonly` sai
 | C2 preview cycle | Works as described |
 | SteadyShot Standard / Active / Dynamic Active | Work |
 | Focus peaking | Works |
-| MP4 header height, XAVC HS 4K 24p | Works: with open gate and the two header instructions applied, DaVinci Resolve imports the clip as 3840 × 2560 with no desktop fix. **Tested with a separate helper that writes the same two instructions after this kit's apply, not yet with step M19 itself.** |
-| Power switch off and on (battery in) | Open gate is gone: the next clip was 3840 × 2160. The MP4 header height stays in memory, so 16:9 clips are then labelled 3840 × 2560 |
+| MP4 header height (step M19), XAVC HS 4K 24p | Works. `open_gate_apply` with M19 run three times from a battery pull: all six steps DONE each time. The stream, tkhd, the `hvc1` sample entry and Sony's VPRF all say 3840 × 2560; Sony's XML still says `HEVC_3840_2160`. The clips show at 3:2 on a Mac without any fix (and earlier, with the same two instructions written by a separate helper, DaVinci Resolve imported them as 3840 × 2560) |
+| `open_gate_putback`, same power-on | Works. With the preview at 3:2 first: C20, S17, M20, L17, L6, L14 all DONE; M20 wrote back 107 sites (101 av-cam.bin, the four libmpr.so rows and the two header instructions). The next XAVC HS 4K 24p clip was a plain 3840 × 2160 file with 3840 × 2160 headers |
+| Power switch off and on (battery in) | Mixed state: coprocessor sites stock, encoder sites still applied (see above). One 4K 24p clip: a 3840 × 2560 file, the 16:9 picture letterboxed with 200 black rows above and below, headers 3840 × 2560. XAVC S HD 1920 × 1080 23.98p and S&Q (59.94 capture, 29.97 file, 1920 × 1080) recorded normally, with 1920 × 1080 streams and headers. C2 in movie mode did nothing (no preview cycle, no Step zoom). In an earlier session, with kit version 2 as published, the clip after a power switch was a plain 3840 × 2160 file; why the two sessions differ is not known |
 | Battery pull | Everything back to stock |
 
 **Known issues (reported on [issue #1](https://github.com/ArcaneLantern/zve1-open-gate-test/issues/1); this change does not touch them):**
 
-- **60p:** the live view is garbage, and starting a recording crashes the camera. Stay at 24p.
+- **60p:** the live view is garbage, and starting a recording crashes the camera (seen again with this version). Pressing record at 4K 59.94p also crashed and restarted the camera in the mixed state after a power switch; after that restart C2 did Step zoom again and 4K clips (60p and 24p) were plain 3840 × 2160 files. Stay at 24p.
 - **Live view after the apply:** sometimes a purple cast with a garbled strip at the bottom when movie mode is entered; some applies come up clean. Starting a recording fixes it, and it stays fixed. Going from playback to live view, or from photo to video, gives a brief purple flash about half the time.
 - **Focus / tracking frame:** works, but looks stretched vertically (the 16:9 frame geometry scaled to 3:2). Cosmetic.
 
-**Not tested yet:** open gate in XAVC S 4K (with or without the header height); 25p; in-camera playback of a clip with the new headers; Proxy Recording (the A7 IV kit says to turn it off; do so here too); `open_gate_putback`, or the apply run again, after a power switch; Gyroflow and Catalyst Browse with these files. The two header instructions are the MP4 writer's only 3840-wide cases (one for AVC, one for HEVC), not one per record setting: while they are applied, any 3840-wide recording that goes through them is labelled 2560 rows. That is what happened to the 16:9 clips after the power switch. Two of the function's cases share each instruction; which record settings use the second ones (for example an AVC intra setting) has not been checked.
+**Not tested yet:** `open_gate_putback`, or a second `open_gate_apply`, after a power switch; open gate in XAVC S 4K (with or without the header height); `--no-meta`; `open_gate_apply_no_screen` with the header step; in-camera playback of a clip with the new headers; Proxy Recording (the A7 IV kit says to turn it off; do so here too); 25p; Gyroflow and Catalyst Browse with these files. The two header instructions are the MP4 writer's only 3840-wide cases (one for AVC, one for HEVC), not one per record setting; two of the writer's cases share each instruction, and which record settings use the second ones (for example an AVC intra setting) has not been checked.
 
 **What the A7S III showed, which may or may not happen here:**
 
@@ -116,7 +117,7 @@ If macOS refuses to open a .command file, open System Settings > Privacy & Secur
 
 **While it is applied:** use only XAVC HS 4K or XAVC S 4K at 24p. Other formats, frame rates, S&Q and APS-C/Super 35 are likely to fail or hang. 60p crashed the camera when a recording started.
 
-**After switching off and on with the power switch:** open gate is gone, but the MP4 header height is not. Pull the battery for 10 seconds before recording 16:9 clips, or the files will say 3840 × 2560 over a 3840 × 2160 picture. To shoot open gate again, pull the battery and run `open_gate_apply` again from stills mode.
+**After switching off and on with the power switch:** the camera can be left in a mixed state, sensor side stock and encoder side (with the header height) still at 2560. In that state a 4K clip came out as a 3840 × 2560 file with the 16:9 picture letterboxed, and 60p crashed the camera. Pull the battery for 10 seconds before recording normal 4K again (`open_gate_putback` clears the encoder side in the same power-on; after a power switch it has not been tried). To shoot open gate again, pull the battery and run `open_gate_apply` again from stills mode.
 
 ## Please send back
 
@@ -125,7 +126,7 @@ If macOS refuses to open a .command file, open System Settings > Privacy & Secur
 - The clip's size and frame rate (3840 × 2560, 23.976?), and whether the picture shows the whole sensor height (compare with a photo).
 - What each C2 press shows, and whether the focus frames sit on the picture.
 - Whether the live view is glitchy when you go from stills to movie, and whether a short recording fixes it.
-- **One check after a power-off:** switch off and on with the power switch (no battery pull), stills mode, run `check_readonly`, and include that folder. On a ZV-E1 the power switch removed open gate but left the MP4 header height in memory; the check shows which of the other sites stay.
+- **One check after a power-off:** switch off and on with the power switch (no battery pull), stills mode, run `check_readonly`, and include that folder. On a ZV-E1 the check after a power switch read the coprocessor sites as stock and the encoder sites as applied.
 
 **If the camera misbehaves** (grey lines, flicker, restart, freeze, recording that stops by itself), and it still responds: don't pull the battery yet. Switch to stills, connect USB, run `dump_info`, send the folder, and then pull the battery. If it does not respond, just pull the battery.
 

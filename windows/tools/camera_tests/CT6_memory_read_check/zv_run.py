@@ -56,7 +56,7 @@ WRITE_STEPS = {
     # M19/M20 (2026-11-24): ogfile2560_hs_s_zv_v2 = v1 plus the MP4 header height (libmpr.so 0x207d8c avc1, 0x207dd8 hvc1 -> 2560; v1's two
     # optional_sites, the A7 IV's 0x222b90 / 0x222bdc): tkhd, stsd and Sony's PROF say 3840x2560. Sony's XML unchanged. Level 19/20 code as L19/L20.
     # Built with zig 0.17.1 (clang 22.1.8), not the kit's ziglang (clang 18.1.6): rebuilt with the kit's toolchain the hashes will differ.
-    # Not run on a camera in this form; the same two writes made by a separate helper after L19 gave files Resolve opens at 3840x2560.
+    # Run on a ZV-E1 (2026-11-24): M19 three times, M20 once, every step DONE; clips 3840x2560 in stream, tkhd, stsd and VPRF, then 2160 after M20.
     "M19": ("libJit_zv_M19.so", "b365e57f6c85152726c66ff0bdee05cd79faf0a44e31181c268aa035109c45e9", "apply the encoder-side design ogfile2560_hs_s_zv_v2 (101 + 6 sites: v1 and the MP4 header height)"),
     "M20": ("libJit_zv_M20.so", "997282b09c5121adae34a5633a108fde1c41f5c8fc64b565d213c14afebad311", "put back the encoder-side design ogfile2560_hs_s_zv_v2 (also after an apply of v1)"),
     "S16": ("libJit_zv_S16.so", "a82430f73be411ce2ea84ba53653d8460ad1855bf153eda83373adab82741683", "apply the screen words lcdfill_zv_v2 (the whole 3:2 picture on the 3:2 rear screen, and the focus-frame rectangles: 5 words)"),
@@ -468,7 +468,7 @@ def main():
                 "yes" if out.get("library_sent") else "no",
                 {False: "no (confirmed)", True: "YES", None: "not sent" if not out.get("library_sent") and not a.remove_only else "UNKNOWN"}[out.get("library_on_camera_after")]))
             if a.which in WRITE_STEPS:
-                print("This was a WRITE step. A cold boot (battery out for 10 seconds) undoes everything written. On the A7S III the power switch did too (not known for the ZV-E1): keep the camera on between steps.")
+                print("This was a WRITE step. A cold boot (battery out for 10 seconds) undoes everything written. On the ZV-E1 the power switch undoes only part of it (the encoder side stays): keep the camera on between steps.")
             else:
                 print("Nothing on the camera was changed. Unplug and replug the USB cable before another run; a cold boot (battery out) clears the result file.")
 
