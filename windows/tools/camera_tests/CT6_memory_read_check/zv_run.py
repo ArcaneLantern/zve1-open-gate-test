@@ -53,13 +53,19 @@ WRITE_STEPS = {
     "L17": ("libJit_zv_L17.so", "8dbe4247edf49fbc3fdbc51a8bfdc6795212c83980469b5a8b9a8ec15de03c27", "put back the output size outsz2560_zv_v1"),
     "L19": ("libJit_zv_L19.so", "4341773dcfb1cb922379075ed2760f75e9443e7a9127f9ae80ddd5ebff895c26", "apply the encoder-side design ogfile2560_hs_s_zv_v1 (101 + 4 sites)"),
     "L20": ("libJit_zv_L20.so", "f54bb2855db9fe4e7d48c7eec06f67b9b9c218ebe8fb839ad4e219406df9a987", "put back the encoder-side design ogfile2560_hs_s_zv_v1"),
+    # M19/M20 (2026-11-24): ogfile2560_hs_s_zv_v2 = v1 plus the MP4 header height (libmpr.so 0x207d8c avc1, 0x207dd8 hvc1 -> 2560; v1's two
+    # optional_sites, the A7 IV's 0x222b90 / 0x222bdc): tkhd, stsd and Sony's PROF say 3840x2560. Sony's XML unchanged. Level 19/20 code as L19/L20.
+    # Built with zig 0.17.1 (clang 22.1.8), not the kit's ziglang (clang 18.1.6): rebuilt with the kit's toolchain the hashes will differ.
+    # Not run on a camera in this form; the same two writes made by a separate helper after L19 gave files Resolve opens at 3840x2560.
+    "M19": ("libJit_zv_M19.so", "b365e57f6c85152726c66ff0bdee05cd79faf0a44e31181c268aa035109c45e9", "apply the encoder-side design ogfile2560_hs_s_zv_v2 (101 + 6 sites: v1 and the MP4 header height)"),
+    "M20": ("libJit_zv_M20.so", "997282b09c5121adae34a5633a108fde1c41f5c8fc64b565d213c14afebad311", "put back the encoder-side design ogfile2560_hs_s_zv_v2 (also after an apply of v1)"),
     "S16": ("libJit_zv_S16.so", "a82430f73be411ce2ea84ba53653d8460ad1855bf153eda83373adab82741683", "apply the screen words lcdfill_zv_v2 (the whole 3:2 picture on the 3:2 rear screen, and the focus-frame rectangles: 5 words)"),
     "S17": ("libJit_zv_S17.so", "86087137ad4e513bd3eb0fdf2a787f794f75ba2df7031c3ec53637927454876c", "put back the screen words lcdfill_zv_v2"),
     "C19": ("libJit_zv_C19.so", "431c8b87cbf5ffaa8a769c1881765eac52af17e471c1e7c6f50cea96ba6fba7e", "apply the C2 preview routine lcdcycle_zv_v1 (3:2, 2:1, 2.25:1, 2.4:1; code in appFw.so: the routine, then one branch to it)"),
     "C20": ("libJit_zv_C20.so", "d6d96e8a72f86375d3a27bf7bccfe05276b0c340edd4da11d1265c8b0791a35c", "put back the C2 preview routine lcdcycle_zv_v1"),
 }
 PINS.update({k: v[:2] for k, v in WRITE_STEPS.items()})
-LEVELS.update({k: {"L": 200, "S": 300, "C": 400}[k[0]] + int(k[1:]) for k in WRITE_STEPS})
+LEVELS.update({k: {"L": 200, "S": 300, "C": 400, "M": 500}[k[0]] + int(k[1:]) for k in WRITE_STEPS})
 WHICH = "check"
 
 
@@ -420,7 +426,7 @@ def main():
     ap.add_argument("--remove-only", action="store_true")
     ap.add_argument("--clear-result", metavar="SHA256", help="first delete the result file of an earlier run from the RAM disk, only if its SHA-256 is this")
     ap.add_argument("--firmware-shown")
-    ap.add_argument("--writes-memory", action="store_true", help="needed for a write step (L13, L14, L5, L6, L16, L17, L19, L20, S16, S17, C19, C20): it changes the running camera's memory")
+    ap.add_argument("--writes-memory", action="store_true", help="needed for a write step (L13, L14, L5, L6, L16, L17, L19, L20, M19, M20, S16, S17, C19, C20): it changes the running camera's memory")
     a = ap.parse_args()
     if a.which in WRITE_STEPS and a.go and not (a.dry_run or a.selftest) and not a.writes_memory:
         raise SystemExit("%s is a write step: %s. It needs --writes-memory as well. Use zv_apply.py. Nothing was sent." % (a.which, WRITE_STEPS[a.which][2]))
