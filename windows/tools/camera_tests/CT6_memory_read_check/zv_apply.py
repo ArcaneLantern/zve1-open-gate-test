@@ -2,7 +2,7 @@
 2026-11-24; made from s3_apply.py. Run once on a ZV-E1, 2026-11-23, without the raw write buffer step: every step applied, then the camera
 restarted on entering movie mode. This version adds that step, L13, first.)
 
-  python zv_apply.py apply    [--no-screen] [--dry-run]
+  python zv_apply.py apply    [--no-screen] [--no-meta] [--dry-run]
   python zv_apply.py putback  [--no-screen] [--dry-run]
   python zv_apply.py screen | screen-putback  [--dry-run]
   (apply and screen take --no-movie-session to leave out the closing read-only session)
@@ -17,12 +17,14 @@ ZV-E1 (26,214,400 on the A7S III), too small for the full-height frame, so the f
 (the A7 IV's F673). Step L13 gives that buffer the A7S III's size; it has to be written before movie mode is entered after a cold boot.
 
   apply    six steps, each its own USB session: L13 raw write buffer size (dmmwb_zv_v1), L5 sensor side (ogsq_zv_v2), L16 output size (outsz2560_zv_v1),
-           L19 encoder side (ogfile2560_hs_s_zv_v1), S16 rear screen shows the whole 3:2 picture with the focus frames
+           M19 encoder side and the MP4 header height (ogfile2560_hs_s_zv_v2), S16 rear screen shows the whole 3:2 picture with the focus frames
            (lcdfill_zv_v2), C19 the C2 key steps the preview 3:2 -> 2:1 -> 2.25:1 -> 2.4:1 in movie mode
            (lcdcycle_zv_v1). Afterwards: XAVC HS 4K or XAVC S 4K at 23.98p only. With --no-screen only the first four.
-           A step that finds its bytes already applied says NOTHING TO DO and counts as passed.
-  putback  the reverse: C20, S17, L20, L17, L6, L14 (with --no-screen the last four). The screen part needs the preview
-           at 3:2: press C2 until it is. A cold boot (battery out for 10 seconds) also undoes everything.
+           A step that finds its bytes already applied says NOTHING TO DO and counts as passed; so does each site of a step.
+           --no-meta: L19 (ogfile2560_hs_s_zv_v1) instead of M19, the MP4 headers say 3840x2160 as before 2026-11-24.
+  putback  the reverse: C20, S17, M20, L17, L6, L14 (with --no-screen the last four). M20 also puts back an apply made with
+           --no-meta. The screen part needs the preview at 3:2: press C2 until it is. A cold boot (battery out for 10 seconds)
+           also undoes everything.
   screen / screen-putback   only the two screen steps (S16, C19) or their put back (C20, S17).
 
 The closing session (apply and screen). On the A7S III the live view is glitchy (purple, lower part black) whenever movie
@@ -36,8 +38,15 @@ Rules it keeps:
 - It stops at the first step that does not end in DONE or NOTHING TO DO, and says what state that leaves.
 - Each step is one pinned library; the runner (zv_run.py) refuses any other bytes.
 Nothing is written to a firmware file or to the camera's settings. What is written lives in the running camera's
-memory. A cold boot (battery out for 10 seconds) removes it. On the A7S III the power switch removed it as well; on the
-ZV-E1 that is not known yet, so the camera must stay on from the first step to the last.
+memory. A cold boot (battery out for 10 seconds) removes it. The camera must stay on from the first step to the last.
+
+The MP4 header height (M19, the A7 IV's ogfile2560_hs_s_v2 on this body): the file's tkhd, its stsd entry and Sony's PROF box say 3840x2560, so
+editors open it at 3:2 without a remux. Sony's XML (M01.XML beside the file, and the one inside it) still says 3840x2160 16:9. The two
+instructions are in libmpr.so in the camera's main process. On a ZV-E1 (2026-11-24) the power switch, without a battery pull, left a mixed
+state: every coprocessor site read stock, the av-cam.bin and libmpr.so sites applied. One 4K 24p clip in that state was a 3840x2560 file with
+the 16:9 picture letterboxed (200 black rows above and below) and 3840x2560 in its headers; 60p crashed the camera. After the power switch:
+battery out for 10 seconds. Putback clears the encoder side in the same power-on (tried); after a power switch neither putback nor a second
+apply has been tried.
 """
 import argparse
 import json
@@ -53,7 +62,7 @@ import ct1_common as c  # noqa: E402
 import zv_run  # noqa: E402
 
 FIRMWARE = zv_run.FIRMWARE
-STEPS = {"apply": ("L13", "L5", "L16", "L19"), "putback": ("L20", "L17", "L6", "L14"), "screen": ("S16", "C19"), "screen-putback": ("C20", "S17")}
+STEPS = {"apply": ("L13", "L5", "L16", "M19"), "putback": ("M20", "L17", "L6", "L14"), "screen": ("S16", "C19"), "screen-putback": ("C20", "S17")}
 RUNNER = HERE / "zv_run.py"
 LISTER = HERE.parent / "CT1_usb_first_contact" / "ct1_stage2_service.py"
 
@@ -148,7 +157,7 @@ def movie_session():
     say(">>> 2. Press the Still/Movie/S&Q button until the camera is in MOVIE mode (File Format XAVC HS 4K or XAVC S 4K, 24p).")
     say(">>>    Look at the rear screen for five seconds and remember it: right, or glitchy?")
     say(">>> 3. Plug the USB cable in again, still in MOVIE mode.")
-    say(">>> Do NOT switch the camera off: on the A7S III the power switch removed the patch, and on the ZV-E1 it is not known.")
+    say(">>> Do NOT switch the camera off: the power switch puts back only part of the state (the encoder side stays).")
     say("If the camera restarts by itself after step 2 (the first test did, without step L13): leave it on, stills mode, replug, and run dump_info.")
     say("Waiting for the unplug and the replug (Ctrl+C to stop; the patch stays applied either way) ...")
     if not wait_for_replug():
@@ -187,15 +196,20 @@ def main():
     ap.add_argument("what", choices=sorted(STEPS))
     ap.add_argument("--dry-run", action="store_true", help="show the steps and what each would send; nothing is sent")
     ap.add_argument("--no-screen", action="store_true", help="with apply or putback: only the three open-gate steps, without the two screen steps")
+    ap.add_argument("--no-meta", action="store_true", help="with apply: the encoder step without the MP4 header height (L19, ogfile2560_hs_s_zv_v1): the headers say 3840x2160 as before 2026-11-24")
     ap.add_argument("--screen", action="store_true", help="accepted and ignored: the screen steps are part of apply and putback now")
     ap.add_argument("--no-movie-session", action="store_true", help="with apply or screen: leave out the closing read-only session in movie mode")
     a = ap.parse_args()
     steps = STEPS[a.what]
     if a.no_screen and a.what not in ("apply", "putback"):
         raise SystemExit("--no-screen goes with apply or putback. Nothing was sent.")
+    if a.no_meta and a.what != "apply":
+        raise SystemExit("--no-meta goes with apply (putback's M20 puts back either encoder step). Nothing was sent.")
     with_screen = not a.no_screen
     if a.what in ("apply", "putback") and with_screen:
         steps = steps + STEPS["screen"] if a.what == "apply" else STEPS["screen-putback"] + steps
+    if a.no_meta:
+        steps = tuple("L19" if k == "M19" else k for k in steps)
     applying = a.what in ("apply", "screen")
     for k in steps:                                  # every library must be the pinned one before anything starts
         name, sha, _ = zv_run.WRITE_STEPS[k]
@@ -223,14 +237,14 @@ def main():
     say()
     say("This WRITES into the running camera's memory (not its firmware, not its settings).")
     if applying:
-        say("NOTHING OF THIS KIT HAS RUN ON A ZV-E1. It is the A7S III kit that works on an A7S III (2026-11-22), rebuilt from the ZV-E1's own")
-        say("files and tried only in emulation. If anything is not as described: battery out for 10 seconds returns the camera to stock.")
+        say("These steps have run on one ZV-E1 (2.02, 2026-11-24: 3840x2560 at 24p in XAVC HS 4K, with the MP4 headers saying 3840x2560).")
+        say("If anything is not as described: battery out for 10 seconds returns the camera to stock.")
         if with_screen:
             say("If screen steps of an earlier kit are still in the camera's memory: pull the battery first.")
     else:
         say("It has to follow an apply of this kit.")
-    say("A cold boot (battery out for 10 seconds) returns the camera to stock. On the A7S III the power switch did too; on the ZV-E1 it is not known:")
-    say("so KEEP THE CAMERA SWITCHED ON from now until the script says it is finished.")
+    say("A cold boot (battery out for 10 seconds) returns the camera to stock. The power switch puts back only part of it (the encoder side")
+    say("stays): so KEEP THE CAMERA SWITCHED ON from now until the script says it is finished.")
     if a.what == "apply":
         say("Before you go on: shooting mode stills, a charged battery, and a camera that was cold booted and has not been in movie mode since.")
         say("(If the open-gate state is already applied in this power-on, its steps will say NOTHING TO DO: that is fine.)")
@@ -285,7 +299,12 @@ def main():
         else:
             movie_session()
         say()
-        say("Use only XAVC HS 4K or XAVC S 4K at 24p (23.98p) while it is applied: on the A7S III 60p distorted the picture and crashed the camera.")
+        say("Use only XAVC HS 4K or XAVC S 4K at 24p (23.98p) while it is applied: 60p gives a garbage live view and recording at 60p crashed the camera.")
+        if "M19" in steps:
+            say("The MP4 headers say 3840x2560 (editors open the file at 3:2 without a remux); Sony's XML in and beside the file still says 3840x2160 16:9.")
+            say("After the POWER SWITCH (no battery pull) the sensor side was stock but the encoder side and the header height stayed at 2560:")
+            say("a 4K clip then came out 3840x2560 with the 16:9 picture letterboxed, and 60p crashed the camera. So after switching off and on:")
+            say("battery out for 10 seconds before recording. (open_gate_putback is tried only without a power switch in between.)")
         say("If the camera stops or restarts: do NOT pull the battery yet. Shooting mode stills, replug USB and run dump_info, then send camera_private.")
         say("To return to stock: battery out for 10 seconds.")
 

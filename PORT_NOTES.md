@@ -104,6 +104,17 @@ The size table is filled by 0x4aadd8 into base 0x19964c4 + 0x50, as the A7C II's
 - **The descriptor table has 647 rows of 0x88 bytes** (A7S III: 689 × 0x90).
 - The same 29 descriptors are chosen: 101 av-cam + 4 libmpr sites.
 
+## MP4 header height: `ogfile2560_hs_s_zv_v2` (steps M19 / M20)
+
+- v1 plus v1's two `optional_sites`, as the A7 IV's `ogfile2560_hs_s_v2`. The MP4 writer's request set-up at 0x207d14 (the A7 IV's 0x222b18, −0x1ae04) writes width, height and sample entry per case; its jump table is at 0x2ba0e8.
+- 0x207d8c (the 3840-wide AVC case, `avc1`) and 0x207dd8 (the 3840-wide HEVC case, `hvc1`): `mov w6,#0x870` → `mov w6,#0xa00`. They are the function's only 3840-wide instructions: of the jump table's 14 cases, 2 and 9 reach the AVC one and 5 and 7 the HEVC one, so every 3840-wide recording that goes through the function gets 2560 while they are applied. Which record settings use cases 9 and 7 is not known.
+- Guards as in the A7 IV's v2 library: the two instructions before and the two after each site, which are byte-identical to the A7 IV's.
+- `06 0e 81 52` occurs a third time, at 0x207f3c: the 4096-wide case (`mov w7,#0x1000` follows). It is not touched.
+- v1's note on the profile-compatibility lookups (0x222714) was not followed further here. On a ZV-E1 (2026-11-24) M19 was applied three times from a battery pull, every step DONE (each M19 result: the six libmpr.so sites "as expected", then "written and read back"). The XAVC HS 4K 24p clips recorded normally: the stream, tkhd, the `hvc1` sample entry and Sony's VPRF say 3840 × 2560; Sony's XML still says `HEVC_3840_2160`. `open_gate_putback` in the same power-on (C20, S17, M20, L17, L6, L14) was DONE throughout; M20 wrote back 107 sites, and the next clip was 3840 × 2160 in stream and headers.
+- Both instructions are in libmpr.so's code in the camera's main process (`im.elf`), written through `/proc/self/mem` like the four `g_videoParamComb` rows. After a power switch (a few seconds off, battery in) a `check_readonly` read every coprocessor site as stock (stored record "filled at run time", not counted) and all 101 av-cam.bin sites and the four libmpr.so rows as applied; it does not read the two header instructions. `im.elf`'s main-thread context-switch counts kept growing across the power switch (17,122 → 17,829) and were back at about 17,122 after a battery pull, which fits the process running on. A 4K 24p clip in that state was a 3840 × 2560 stream with the 16:9 picture in the middle and 200 black rows above and below, and 3840 × 2560 in its headers: the header height matched the stream. The leftover state is the encoder side, which v1 leaves behind as well (with v1 such a file would say 2160 in its headers over a 2560 stream). HD and S&Q clips recorded normally in that state; 4K 59.94p crashed and restarted the camera, after which 4K clips were plain 3840 × 2160. Seen in one session. A plain 3840 × 2160 clip from an earlier session was most likely recorded after a battery pull rather than only the power switch (not logged). A battery pull with M19 applied was checked: afterwards every site read stock and the next 4K clip was plain 3840 × 2160 in stream and headers.
+- Built by `modding/zve1/build_ogfile_meta_zv.py` from v1 and `gen_zv_write.py` (which now takes single libmpr.so instructions as sites). The generator gives the v1, lcdcycle and words headers byte for byte as published. M19 / M20 were built with zig 0.17.1 (clang 22.1.8), not the kit's ziglang (clang 18.1.6); the published L19 / L20 and the same source built that way give the same result in emulation.
+- Emulated (the library's own code, against libmpr.so and av-cam.bin of 2.02): apply, apply again (NOTHING TO DO), put back byte for byte, partial states as after a power switch (header only, all of libmpr.so, header and av-cam: M19 completes, M20 returns all to stock; L20 leaves the header at 2560), a wrong guard or a site with other bytes (nothing written).
+
 ## Screen: `lcdfill_zv_v2` and `lcdcycle_zv_v1`
 
 The rear screen is 3.0-type, 1,036,800 dots = 720 × 480 = **3:2**, and there is **no viewfinder**. So the A7S III's 4:3 step (`lcdratio32_s3_v1`) does not apply. The A7 IV / A7C II step does instead:
@@ -145,7 +156,7 @@ The rear screen is 3.0-type, 1,036,800 dots = 720 × 480 = **3:2**, and there is
 - Everything the A7S III kit left open: the live-view fault when movie mode is entered from stills, exposure and autofocus, and 60p.
 - Whether receiver type 6 (the ZV-E1's 4K) behaves like the A7S III's 5 when replaced.
 - The geometry row's extra field.
-- Whether the power switch removes the patch on this body.
+- Whether the power switch always leaves the encoder side applied. Seen once: coprocessor sites stock, encoder sites applied, a letterboxed 3840 × 2560 clip; a battery pull clears everything, header included.
 
 Known from the first test: every site holds the stock bytes the files predict; the rear panel's type byte is 3 (3:2); the stored record's run-time bytes are +0x11a/+0x11b; a restart does not keep the patch.
 - The physical C2 key's event.

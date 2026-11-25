@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build the twelve ZV-E1 2.02 write libraries from the A7 IV helper's source (helper/readcheck.c), with this build's tables and constants
+# Build the fourteen ZV-E1 2.02 write libraries from the A7 IV helper's source (helper/readcheck.c), with this build's tables and constants
 # (ZV-E1 port of the A7S III kit, 2026-11-24). Run gen_zv_write.py first.
 # usage: build_zv_write.sh        (writes libJit_zv_<step>.so into this folder and prints SHA-256, size, step)
 # Flags are those of helper/rebuild.sh. Differences from an A7 IV build: the headers of gen_zv_write.py, the ZV-E1 libsencore.so to link
@@ -8,9 +8,9 @@
 #            (= A7C II 0x1a8c558 / 0x1a8c0ac); the one word of dmmwb_zv_v1 (the movie raw write buffer's size), with texts for one word
 #   L5/L6    IMAGER 0x17f1f64 (0x96bce6 returns it; = A7S III 0x12a41f0, A7C II 0x18aeb8c), drive-parameter pointer at control +0x684
 #            (as the A7C II: 27 accesses, the first in the constructor block), stored record 0x170 bytes (0x96f2c4)
-#   L19/L20, C19/C20   av-cam.bin at physical 0x401000000 (kemco.txt, byte-identical to the A7C II's)
+#   L19/L20, M19/M20, C19/C20   av-cam.bin at physical 0x401000000 (kemco.txt, byte-identical to the A7C II's)
 # Steps as in the A7S III kit: L = open gate (5/6 sensor side, 16/17 output size, 19/20 encoder side), S = screen words (16/17),
-# C = the C2 preview routine in appFw.so (19/20).
+# C = the C2 preview routine in appFw.so (19/20), M = the encoder side with the MP4 header height (ogfile2560_hs_s_zv_v2, 19/20).
 set -e
 H="$(cd "$(dirname "$0")" && pwd)"
 SEN="$H/../../../work/extracted/zve1_202/0700_part_image/dev/nflasha15/lib/libsencore.so"
@@ -33,7 +33,8 @@ for L in 16 17; do
 done
 for L in 19 20; do
   "${CC[@]}" -DLEVEL=$L '-DMP_H="expected_mp_ogfile2560_hs_s_zv_v1.h"' -DAVCAM_PHYS=0x401000000UL readcheck.c -o "$H/libJit_zv_L$L.so"
+  "${CC[@]}" -DLEVEL=$L '-DMP_H="expected_mp_ogfile2560_hs_s_zv_v2.h"' -DAVCAM_PHYS=0x401000000UL readcheck.c -o "$H/libJit_zv_M$L.so"
   "${CC[@]}" -DLEVEL=$L '-DMP_H="expected_mp_lcdcycle_zv_v1.h"' -DAVCAM_PHYS=0x401000000UL readcheck.c -o "$H/libJit_zv_C$L.so"
 done
 cd "$H"
-for N in L13 L14 L5 L6 L16 L17 L19 L20 S16 S17 C19 C20; do echo "$(sha256sum libJit_zv_$N.so | cut -d' ' -f1) $(stat -c %s libJit_zv_$N.so) $N"; done
+for N in L13 L14 L5 L6 L16 L17 L19 L20 M19 M20 S16 S17 C19 C20; do echo "$(sha256sum libJit_zv_$N.so | cut -d' ' -f1) $(stat -c %s libJit_zv_$N.so) $N"; done
