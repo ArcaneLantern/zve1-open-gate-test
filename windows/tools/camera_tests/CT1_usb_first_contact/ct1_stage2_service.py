@@ -178,7 +178,7 @@ def connect(session):
         from pmca.usb.sony import isSonyMscCamera
         inner = libusb.MscContext().openDevice(msc[0])
         if sys.platform == "darwin":
-            take_over_from_macos(session, inner)
+            inner = take_over_from_macos(session, inner) or inner
         session.log("note", text="SCSI TEST UNIT READY and INQUIRY through PMCA-RE MscDevice")
         info = MscDevice(inner).getDeviceInfo()
         session.results["msc_usb_id"] = "%04x:%04x" % (msc[0].idVendor, msc[0].idProduct)
@@ -210,7 +210,9 @@ def take_over_from_macos(session, inner):
     which macOS allows only as root. The card is unmounted first; then PMCA-RE's UsbBackend.reset() detaches the
     driver from interface 0. Nothing is sent to the camera here."""
     import os
+    import time
     import usb.core
+    import usb.util
     if os.geteuid() != 0:
         raise c.StopTest("macOS holds the camera with its own mass-storage driver, and taking it over needs admin "
                          "rights. Run the launchers in the macos folder: they ask for your password")
@@ -219,8 +221,58 @@ def take_over_from_macos(session, inner):
         inner.reset()
     except usb.core.USBError as exc:
         raise c.StopTest("macOS did not let go of the camera's mass-storage driver (%s)" % exc)
+
+    dev = getattr(getattr(inner, "backend", None), "dev", None)
+    if dev is not None:
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            try:
+                rows = c.ioreg_sony_devices()
+            except Exception:
+                break
+            if not rows or not any("IOUSBMassStorage" in (row.get("service") or "") for row in rows):
+                break
+            time.sleep(0.15)
+
+        time.sleep(0.15)
+        last_exc = None
+        reopened = False
+        for attempt in range(10):
+            try:
+                usb.util.claim_interface(dev, 0)
+                last_exc = None
+                break
+            except usb.core.USBError as exc:
+                last_exc = exc
+                if attempt == 3 and not reopened:
+                    reopened = True
+                    try:
+                        usb.util.dispose_resources(dev)
+                    except Exception:
+                        pass
+                    try:
+                        msc_new, _ = libusb_devices()
+                        if len(msc_new) == 1:
+                            from pmca.usb.driver.generic import libusb
+                            inner = libusb.MscContext().openDevice(msc_new[0])
+                            new_dev = getattr(getattr(inner, "backend", None), "dev", None)
+                            if new_dev is not None:
+                                dev = new_dev
+                    except Exception:
+                        pass
+                time.sleep(0.3)
+        if last_exc is not None:
+            msg = "macOS did not let go of the camera interface (%s)" % last_exc
+            if "other error" in str(last_exc).lower() or getattr(last_exc, "backend_error_code", None) == -99:
+                msg += (
+                    ". On macOS, USB Mass Storage access requires Removable Volumes permission "
+                    "(allow the prompt or check System Settings > Privacy & Security > Files & Folders)."
+                )
+            raise c.StopTest(msg)
+
     session.log("note", text="macOS mass-storage driver detached through PMCA-RE UsbBackend.reset")
     session.say("macOS let go of the camera")
+    return inner
 
 
 # ------------------------------------------------------------ dry run
