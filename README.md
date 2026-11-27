@@ -94,6 +94,8 @@ Each live run asks for your Mac password. macOS keeps its own driver on the came
 
 If macOS refuses to open a .command file, open System Settings > Privacy & Security and click "Open Anyway". Or, in Terminal, type `bash` and a space, drag the file in, and press Return.
 
+**A Mac app for this kit (community project).** [Arcane Lantern Bridge](https://github.com/lostfoundead/arcane-lantern-bridge) runs these same scripts, unchanged, from a window: it runs the check, applies, prompts when the cable has to be replugged, and says when it is safe to unplug. Tested on a ZV-E1 (2.02) on macOS 27. It is not part of this kit; please report problems with the app in its own repository.
+
 ## Android
 
 `android/ZVE1-OpenGate.apk` runs the same files from a phone connected by USB-C (or an OTG adapter). Only the USB access, the dialogs and the folder for the results are the phone's.
