@@ -63,10 +63,26 @@ WRITE_STEPS = {
     "S17": ("libJit_zv_S17.so", "86087137ad4e513bd3eb0fdf2a787f794f75ba2df7031c3ec53637927454876c", "put back the screen words lcdfill_zv_v2"),
     "C19": ("libJit_zv_C19.so", "431c8b87cbf5ffaa8a769c1881765eac52af17e471c1e7c6f50cea96ba6fba7e", "apply the C2 preview routine lcdcycle_zv_v1 (3:2, 2:1, 2.25:1, 2.4:1; code in appFw.so: the routine, then one branch to it)"),
     "C20": ("libJit_zv_C20.so", "d6d96e8a72f86375d3a27bf7bccfe05276b0c340edd4da11d1265c8b0791a35c", "put back the C2 preview routine lcdcycle_zv_v1"),
+    # THE 4224x2816 STATE (2026-11-28; NOT RUN ON A CAMERA): the central 4224 x 2816 of the sensor's 4240 x 2832, pixel for pixel; the A7S III
+    # kit's state on this body. The same levels with other tables: H = the sensor side with the first stage passed one to one, D = the output
+    # planes, K = output size and encoder side, J = the encoder side without the MP4 header size, R = the encoder side with the 100M settings at
+    # 300 Mbps. The raw write buffer step (L13 / L14) is this state's first step too.
+    "H5": ("libJit_zv_H5.so", "6b6a804d5f3ba03f9f1c41ed014dcf61de006b2cfd69bfb921ac705ca0aee08e", "apply the sensor-side design ogh2816_zv_v1 (ogsq_zv_v2's sensor cells; the two records with a first stage of 2832 rows passed one to one; stored record 27/32)"),
+    "H6": ("libJit_zv_H6.so", "461e1113f775c58515ed21a37e29b9b770a7338d45bc9335249fd9f3111165d1", "put back the sensor-side design ogh2816_zv_v1"),
+    "D16": ("libJit_zv_D16.so", "c060a33502aa937c356f781649b7e5233ad26aedf6a61720132ca428794b2100", "apply the output planes dmm7slot_zv_v1 (ten words: seven 4K planes of 14,942,208 bytes, as the FX6 kit's memory step)"),
+    "D17": ("libJit_zv_D17.so", "42aecaae208ab5592fa853a43fdcd61d40f8cbcdda3bde8d0287d49e47a51c3d", "put back the output planes dmm7slot_zv_v1"),
+    "K16": ("libJit_zv_K16.so", "13bb3ad7df0fd96bd8152619f366ffaedccd7c4dafdbf8e2e75865a77f9dc89f", "apply the output size outsz4224_zv_v1 (one word: 4224 x 2816)"),
+    "K17": ("libJit_zv_K17.so", "f21e37c2c77fb9cd39d395150224774ce1cbb4427ac9144cc9dc7c81e463e738", "put back the output size outsz4224_zv_v1"),
+    "K19": ("libJit_zv_K19.so", "7626f34713cf03abac1ed524eb3787c01a220d8ecb287bfa6f4b29cf3e16edae", "apply the encoder-side design ogfile4224_zv_v1 (205 + 13 sites: 4224 x 2816 on both encoder cores, and the MP4 header size)"),
+    "K20": ("libJit_zv_K20.so", "000f1ba59130db5a96951042690cb5d5eb9bd0b375e1c2e157615395d959f879", "put back the encoder-side design ogfile4224_zv_v1 (also after J19)"),
+    "J19": ("libJit_zv_J19.so", "9a3100c3ca960b3e9103173d95033837c62c8353b65729a5fb8276cab5b11bc7", "apply the encoder-side design ogfile4224nm_zv_v1 (205 + 4 sites, without the MP4 header size)"),
+    "R19": ("libJit_zv_R19.so", "05190ab51170b86f62dc1dabb72f749390db7e60de3bf73eaf12c3218b5007dd", "apply the encoder-side design ogfile4224r300_zv_v1 (238 + 13 sites: as K19, the 100M record settings at 300 Mbps)"),
+    "R20": ("libJit_zv_R20.so", "5322e518f3a01b9b68ec97aa005a70831d8d16ddec5534b8e07f47312b6cee31", "put back the encoder-side design ogfile4224r300_zv_v1"),
 }
 PINS.update({k: v[:2] for k, v in WRITE_STEPS.items()})
-LEVELS.update({k: {"L": 200, "S": 300, "C": 400, "M": 500}[k[0]] + int(k[1:]) for k in WRITE_STEPS})
+LEVELS.update({k: {"L": 200, "S": 300, "C": 400, "M": 500, "H": 600, "D": 700, "K": 800, "J": 900, "R": 1000}[k[0]] + int(k[1:]) for k in WRITE_STEPS})
 WHICH = "check"
+FIT_4224 = [4240, 2816, 8, 0, 4224, 2816, 0, 0, 0, 0]   # the second scaler's block in the 4224x2816 state (build/build_og_zv_native.py, the firmware's own fit)
 
 
 def write_result(data):
@@ -320,7 +336,8 @@ def decode_pages(pages):
         st["division_units"] = [{"in_start": struct.unpack_from("<I", dv, k * 0x150 + 0xC)[0], "in_width": struct.unpack_from("<I", dv, k * 0x150 + 0x10)[0],
                                            "out_width": struct.unpack_from("<I", dv, k * 0x150 + 0x20)[0]} for k in range(4)]
     seen = {}
-    pairs = {(4240, 2832), (4240, 2392), (4240, 2385), (4240, 2848), (4240, 2408), (3840, 2560), (3840, 2160), (1920, 1080), (2144, 2392), (2096, 2392), (2176, 2408)}
+    pairs = {(4240, 2832), (4240, 2392), (4240, 2385), (4240, 2848), (4240, 2408), (3840, 2560), (3840, 2160), (1920, 1080), (2144, 2392), (2096, 2392), (2176, 2408),
+             (4224, 2816), (4240, 2816), (4264, 2832), (2144, 2816), (2096, 2816), (2176, 2832), (2128, 2832)}      # the 4224x2816 state
     for addr, (name, blob) in sorted(pages.items()):
         if name not in ("context", "resizework", "resizestate"):
             continue
@@ -469,7 +486,8 @@ def report(session, facts, which):
         for ln in lines:
             session.say(ln)
         return
-    lines = ["ZV-E1 2.02 %s, %s" % (which, time.strftime("%Y-%m-%d %H:%M:%S")), f["header"], f["verdict"],
+    note = state_4224_note(f)
+    lines = ["ZV-E1 2.02 %s, %s" % (which, time.strftime("%Y-%m-%d %H:%M:%S")), f["header"], f["verdict"]] + ([note] if note else []) + [
              "identity: %d same, %d differ" % (f["identity_same"], f["identity_differs"]),
              "kernel: %s" % f["kernel_version"], "command line: %s" % f["kernel_command_line"]]
     for s in f["coprocessor_sites"]:
@@ -498,6 +516,9 @@ def report(session, facts, which):
             b = ss.get("second_scaler_block")
             if b:
                 lines.append("  block: words %s -> takes %s x %s from %s" % (b["words"], b["size"][0], b["size"][1], b["start"]))
+                if b["words"][:2] == [4240, 2816]:       # the 4224x2816 state's front end (ogh2816_zv_v1)
+                    lines.append("    the 4224x2816 state as designed: words %s = 4224 x 2816 from (8, 0), scale 1: %s"
+                                 % (FIT_4224, "EQUAL" if b["words"] == FIT_4224 else "NOT equal"))
             if "second_scaler_input" in ss:
                 lines.append("  input words: %s" % ss["second_scaler_input"])
             rw = ss.get("resize_work")
@@ -527,6 +548,16 @@ def report(session, facts, which):
         session.say(ln)
 
 
+def state_4224_note(f):
+    """One line when a check or dump was taken with the 4224x2816 state applied. This helper knows the 3840x2560 state's bytes only, so its
+    verdict then reads NOT READY; the output-size word is the one place where it shows the other state's value."""
+    oz = next((s for s in f.get("coprocessor_sites", []) if s["name"] == "outsize"), None)
+    if not oz or oz.get("shown") != struct.pack("<HH", 4224, 2816).hex():
+        return None
+    return ("NOTE: the output size word holds 4224 x 2816: the 4224x2816 state is applied. This helper compares with the 3840x2560 state, so NOT READY is "
+            "what it says here; each step of the apply checked its own bytes.")
+
+
 def last_saved_sha():
     """The SHA-256 of the result the newest saved session of this kit fetched, or None."""
     root = c.PRIVATE_ROOT
@@ -549,7 +580,7 @@ def main():
     ap.add_argument("--remove-only", action="store_true")
     ap.add_argument("--clear-result", metavar="SHA256", help="first delete the result file of an earlier run from the RAM disk, only if its SHA-256 is this")
     ap.add_argument("--firmware-shown")
-    ap.add_argument("--writes-memory", action="store_true", help="needed for a write step (L13, L14, L5, L6, L16, L17, L19, L20, M19, M20, S16, S17, C19, C20): it changes the running camera's memory")
+    ap.add_argument("--writes-memory", action="store_true", help="needed for a write step (L13, L14, L5, L6, L16, L17, L19, L20, M19, M20, S16, S17, C19, C20, and the 4224x2816 state's H, D, K, J, R steps): it changes the running camera's memory")
     a = ap.parse_args()
     if a.which in WRITE_STEPS and a.go and not (a.dry_run or a.selftest) and not a.writes_memory:
         raise SystemExit("%s is a write step: %s. It needs --writes-memory as well. Use zv_apply.py. Nothing was sent." % (a.which, WRITE_STEPS[a.which][2]))

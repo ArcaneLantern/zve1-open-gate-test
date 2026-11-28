@@ -4,6 +4,15 @@
 
 The kit records a true 3840 × 2560 (3:2) file of the whole sensor area in XAVC HS 4K and XAVC S 4K at 23.98p. It also shows the live view at 3:2 on the rear screen and adds an anamorphic preview on the C2 key.
 
+**New (2026-11-28), NOT RUN ON A CAMERA YET: a 4224 × 2816 state, the sensor pixel for pixel.** The ZV-E1's sensor gives 4240 × 2832. The default state above squeezes those rows into 2,392 and makes a 3840 × 2560 file from them. The new state keeps the pixels: the file is the central **4224 × 2816** of the sensor at scale 1 (8 columns and 8 rows are left out at each edge), in XAVC HS 4K and XAVC S 4K at 23.98p. It is the A7S III kit's new state, rebuilt from the ZV-E1's own files.
+
+- **Why not 4240 × 2832:** the camera's second scaler works in two units, and each needs a width that is a multiple of 32. Its own planning code refuses a 4240-wide picture with one, two and four units; 4224 is the widest it takes from this sensor. With 2,832 rows the picture could not be cut at scale exactly 1 either; with 2,816 it can.
+- **What is new in it:** the output planes grow (step `D16`, the memory step that runs on the FX6), the first scaler passes the picture one to one (`H5`), the output size is 4224 × 2816 (`K16`), and the encoder runs it on both of its cores with Level 6 (`K19`). The raw write buffer step (`L13`) and the sensor's own settings are those of the default state, which records on a ZV-E1.
+- **Two ways to test, smallest first:** `open_gate_test_real_rows` applies only the new first-scaler step with the proven 3840 × 2560 output: the file is 3840 × 2560 as before, made from 4224 × 2816 real pixels. `open_gate_apply_4224x2816` is the whole state. `..._300mbps` records the 100M settings at 300 Mbps (V60 / V90 card); `..._no_meta` leaves the MP4 headers at 3840 × 2160.
+- **What to send back:** whether it records and stops by itself, the clip or MediaInfo's text, the live view, and `camera_private`. If some frames show a band of wrong rows (about 300, top or bottom), say so, and say whether going to stills and back to movie clears it.
+- **Less was checked offline on this body than on the A7S III:** the ZV-E1's encoder software is another compile. Its request matching, clip code, memory blocks and MP4 headers were run in emulation with the new size and pass. Its start-block builder and its codec's memory calculation could not be run; for those the design rests on being the A7S III design field for field.
+- The three states share memory sites. Put one back, or pull the battery for 10 seconds, before applying another; a step that meets another state's bytes writes nothing and says so. After the power switch (no battery pull) the encoder side stays applied, as in the default state: battery out for 10 seconds before recording.
+
 **MP4 headers (since 2026-11-24): no remux needed.** The encoder step now also sets the height in the MP4 headers (tkhd, the stsd entry and Sony's PROF box) to 2560, as `ogfile2560_hs_s_v2` does on the A7 IV, so the file says 3840 × 2560 as it comes off the card and editors show it at 3:2. Sony's own XML (the `M01.XML` file next to the clip, and the XML inside the clip) still says 3840 × 2160, 16:9 (`HEVC_3840_2160`); Catalyst Browse and Gyroflow read that. `--no-meta` gives the earlier encoder step, with 3840 × 2160 in the headers.
 
 **The power switch is not a full reset on this body.** After switching off for a few seconds and on again (battery in), `check_readonly` read every coprocessor site as stock (sensor, output size, screen, raw write buffer) but the encoder side as still applied (all 101 av-cam.bin sites and the four libmpr.so rows; the v2 check used in that session did not read the two header instructions). A 4K 24p clip recorded in that state was a 3840 × 2560 file with the 16:9 picture in the middle and exactly 200 black rows above and below; its headers said 3840 × 2560, which matches the stream. That is one clip, so take it as what was seen, not as a rule. `open_gate_putback` (in the same power-on) or a battery pull clears the encoder side; see below.
@@ -66,6 +75,11 @@ One ZV-E1, firmware 2.02, macOS, kit version 2 (`8feaae7`): `check_readonly` sai
 | `dump_info` | The same, plus facts for the port: the camera's logs, sensor register state, internal tables, the display tables | No |
 | `open_gate_apply` | Applies the state in six steps (the raw write buffer, open gate with the MP4 header height, the screen at 3:2, the C2 preview), then one read-only session. `--no-meta`: without the header height | **Yes: memory only** |
 | `open_gate_apply_no_screen` | Only the four open-gate steps (the raw write buffer and the three open-gate steps, with the MP4 header height; `--no-meta` as above) | **Yes: memory only** |
+| `open_gate_test_real_rows` | **New, not run.** The raw write buffer, the new sensor step (`H5`), the default output size and encoder steps: a 3840 × 2560 file from 4224 × 2816 real pixels, plus the screen steps | **Yes: memory only** |
+| `open_gate_apply_4224x2816` | **New, not run.** The 4224 × 2816 state in seven steps: the raw write buffer, output planes, sensor side, output size, encoder side (MP4 headers 4224 × 2816), the screen at 3:2, the C2 preview | **Yes: memory only** |
+| `open_gate_apply_4224x2816_300mbps` | The same with the 100M record settings at 300 Mbps (`R19`) | **Yes: memory only** |
+| `open_gate_apply_4224x2816_no_meta` | The same as the second, MP4 headers left at 3840 × 2160 (`J19`) | **Yes: memory only** |
+| `open_gate_putback_4224x2816`, `..._300mbps`, `open_gate_test_real_rows_putback` | Put the matching state back | Yes: memory only |
 | `open_gate_putback` | Puts the six steps back, the MP4 header height included (also after an apply with `--no-meta`) | Yes: memory only |
 | `screen_putback` | Puts the two screen steps back | Yes: memory only |
 
@@ -99,10 +113,12 @@ If macOS refuses to open a .command file, open System Settings > Privacy & Secur
 `android/ZVE1-OpenGate.apk` runs the same files from a phone connected by USB-C (or an OTG adapter). Only the USB access, the dialogs and the folder for the results are the phone's.
 
 1. Install the APK (allow installing from unknown sources). Set the camera's **USB Power Supply to Off**, or it charges from the phone.
-2. Press **1. Read-only check**, then **2. Apply to camera**. The app as published carries the tools from before the MP4 header height: its files say 3840 × 2160 in the headers until the app is rebuilt. The "Screen steps" box chooses between six steps (ticked) and four. Use app version 0.2 or later (0.1 is the first version of the kit).
+2. Press **1. Read-only check**, then **2. Apply to camera**. The app carries the tools as published here, the MP4 header height included (app 0.3, 2026-11-28; 0.2 was built before the header height). The "Screen steps" box chooses between six steps (ticked) and four.
 3. When Android asks to open *ZV-E1 Open Gate* for the camera, tick **Always**. It asks twice: once for Mass Storage, once for service mode.
 4. When the log says **unplug and plug in again**, do that with the phone cable. Never switch the camera off.
 5. Afterwards, press **Export logs**. It writes a zip to `Download/ZVE1-OpenGate/`: send that zip back.
+
+**App 0.3 (2026-11-28):** a list under the boxes chooses the state that **2. Apply to camera**, **Put back** and **Dry run** work on: 3840 × 2560 (the default), 4224 × 2816, 4224 × 2816 at 300 Mbps, or the real-rows test. The three new ones have not run on a camera. Use **Put back** with the same choice the apply was made with.
 
 **Self-test** and **Dry run** need no camera.
 

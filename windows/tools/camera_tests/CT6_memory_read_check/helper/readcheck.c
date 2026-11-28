@@ -68,6 +68,15 @@
  *            stock or the design's bytes, and the kernel's view must equal the mapping. On any failure everything this run wrote is
  *            put back. A cold boot undoes it: av-cam.bin is loaded again from flash and the process starts anew.
  *   level 20 the same code with the two byte sets exchanged: puts the stock bytes back.
+ *   level 29 level 1, then CODE AND DATA OF av-cam.bin, the kernel's AV image (an av-cam code design of helper_fx3/gen_fx3_write.py; the
+ *            first is avdec8k_fx3_v1, the FX3's playback decoder in the A7 IV's form). The code page is mapped read-write through /dev/mem
+ *            at a user address with the kernel address's offset from a 2 MB boundary, the data page as level 19 maps its tables. Before
+ *            anything is written every byte of the code page apart from the sites must be as in the file, every data guard as in the file,
+ *            every site must hold the stock or the design's word, the kernel's view must equal the mappings, CTR_EL0 must name a PIPT or
+ *            VIPT instruction cache, and the cache maintenance is run once on the sites as they are. Each site is one aligned 32-bit store,
+ *            read back in both views; after the code writes, the data cache is cleaned and the instruction cache invalidated at every site on
+ *            every processor. Code first, data last; on any failure everything this run wrote is put back. A cold boot undoes it.
+ *   level 30 the same code with the two word sets exchanged and the order reversed (data first, code last): puts the stock words back.
  *   level 27 level 1, then WRITES: stage V4 of modding/VCD_V4_DESIGN.md. Checks that the codec is off and that its program area at
  *            0x43c000000 holds the stock stubs, writes the three hello_v1 boot stubs there (cached mapping, dc civac, read back in two views),
  *            replays av-cam's own clock-on store by store (F782), releases the codec CPUs (+0x80 = 0), reads the records the stubs write for
@@ -97,8 +106,8 @@
 #ifndef LEVEL
 #define LEVEL 1
 #endif
-#if LEVEL < 1 || LEVEL > 28 || LEVEL == 11
-#error "LEVEL must be 1 to 10, or 12 to 28"
+#if LEVEL < 1 || LEVEL > 39 || LEVEL == 11
+#error "LEVEL must be 1 to 10, or 12 to 39"
 #endif
 #if LEVEL >= 3 && defined(HOST_TEST)
 #error "levels 3 to 8 have no PC build: they call three functions of the camera's libsencore.so (see emu_built.py)"
@@ -128,7 +137,11 @@
 
 #define FILE_CAP   (64 * 1024)             /* at most this much of any one file is copied */
 #define MAPS_CAP   (512 * 1024)            /* except the list of mappings: 64 KB cut it short on the camera (F509) */
+#if LEVEL == 31
+#define TOTAL_CAP  (2 * 1024 * 1024)       /* level 31 only: level 1's part plus at most 1.5 MB of spans (GET_FILE2's first transfer tier is 5 MB) */
+#else
 #define TOTAL_CAP  (1024 * 1024)           /* at most this much is written in all */
+#endif
 #define DIR_ENTRIES_CAP 64
 
 typedef unsigned char u8;
@@ -189,22 +202,22 @@ static i64 sys_write(int fd, const void *b, u64 n) { return sc(NR_write, fd, (i6
 static i64 sys_close(int fd) { return sc(NR_close, fd, 0, 0, 0, 0, 0); }
 static i64 sys_getdents64(int fd, void *b, u64 n) { return sc(NR_getdents64, fd, (i64)b, (i64)n, 0, 0, 0); }
 static i64 sys_geteuid(void) { return sc(NR_geteuid, 0, 0, 0, 0, 0, 0); }
-#if LEVEL == 2 || LEVEL == 3 || (LEVEL >= 7 && LEVEL <= 12) || LEVEL == 15 || LEVEL == 18 || (LEVEL >= 21 && LEVEL <= 28)  /* a level 1 build contains no mapping call at all */
+#if LEVEL == 2 || LEVEL == 3 || (LEVEL >= 7 && LEVEL <= 12) || LEVEL == 15 || LEVEL == 18 || (LEVEL >= 21 && LEVEL <= 28) || LEVEL == 31 || LEVEL == 32 || LEVEL == 33 || LEVEL == 34 || LEVEL == 35 || LEVEL == 39  /* a level 1 build contains no mapping call at all */
 static i64 sys_mmap_ro(int fd, u64 len, u64 off)
 {
     i64 r = sc(NR_mmap, 0, (i64)len, 1 /* PROT_READ */, 1 /* MAP_SHARED */, fd, (i64)off);
     return (r < 0 && r > -4096) ? -1 : r;
 }
 #endif
-/* The only writable mapping call in this file. Levels 4 to 6, 13, 14, 16 and 17 map their own transfer buffer to fill it; levels 19 and 20 map the pages of av-cam.bin's tables; levels 24 and 25 one page of a codec firmware copy at a time. */
-#if (LEVEL >= 4 && LEVEL <= 6) || LEVEL == 13 || LEVEL == 14 || LEVEL == 16 || LEVEL == 17 || LEVEL == 19 || LEVEL == 20 || LEVEL == 24 || LEVEL == 25 || LEVEL == 27
+/* The only writable mapping call in this file (and levels 29 and 30's ad_map_code). Levels 4 to 6, 13, 14, 16 and 17 map their own transfer buffer to fill it; levels 19 and 20 map the pages of av-cam.bin's tables; levels 24 and 25 one page of a codec firmware copy at a time; levels 29 and 30 one page of av-cam.bin's data. */
+#if (LEVEL >= 4 && LEVEL <= 6) || LEVEL == 13 || LEVEL == 14 || LEVEL == 16 || LEVEL == 17 || LEVEL == 19 || LEVEL == 20 || LEVEL == 24 || LEVEL == 25 || LEVEL == 27 || LEVEL == 29 || LEVEL == 30 || LEVEL == 32
 static i64 sys_mmap_rw(int fd, u64 len, u64 off)
 {
     i64 r = sc(NR_mmap, 0, (i64)len, 3 /* PROT_READ | PROT_WRITE */, 1 /* MAP_SHARED */, fd, (i64)off);
     return (r < 0 && r > -4096) ? -1 : r;
 }
 #endif
-#if LEVEL >= 2
+#if LEVEL >= 2 && LEVEL != 36 && LEVEL != 38      /* levels 36 and 38 map and unmap nothing */
 static i64 sys_munmap(void *p, u64 len) { return sc(NR_munmap, (i64)p, (i64)len, 0, 0, 0, 0); }
 #endif
 #endif
@@ -594,7 +607,11 @@ extern u32 sen_dma_transfer(u32 dir, u64 src, u64 dst, u32 size);   /* dir 0: co
 #define RAM_LO 0x400000000UL
 #define RAM_HI 0x500000000UL
 #define N_TABLE (sizeof cp_sites / sizeof cp_sites[0])
+#ifdef MULTI_REC                           /* the FX30 kit (helper_fx30): N_RECS stored records (rec_modes), each in REC_VARIANTS timing variants */
+#define N_SITES (N_TABLE + N_RECS)
+#else
 #define N_SITES (N_TABLE + 1)              /* the table's sites, then the stored record */
+#endif
 #define CP_LO 0x108000UL                   /* pointers read from coprocessor memory must lie between these, or nothing is written */
 #define CP_HI 0x10000000UL
 #ifndef IMAGER                             /* another build of the camera software names its own (-DIMAGER=, -DCTRL_DRVPARAM=): helper_s3/build_s3_write.sh */
@@ -624,8 +641,14 @@ extern u32 sen_dma_transfer(u32 dir, u64 src, u64 dst, u32 size);   /* dir 0: co
 
 static u64 l5_phys;
 static u8 *l5_buf;
+#ifdef MULTI_REC
+static struct cp_site l5_recs[N_RECS];     /* the sites after the table's, filled in once the records have been found */
+static u32 l5_variant;                     /* the timing variant all records hold (index into rec_stock / rec_new) */
+static const struct cp_site *site_at(u64 i) { return i < N_TABLE ? &cp_sites[i] : &l5_recs[i - N_TABLE]; }
+#else
 static struct cp_site l5_rec;              /* the 14th site, filled in once the record has been found */
 static const struct cp_site *site_at(u64 i) { return i < N_TABLE ? &cp_sites[i] : &l5_rec; }
+#endif
 
 /* Every transfer is of whole 64-byte lines: the lines a site lies in, at most 4,096 bytes (the generator checks). */
 static u64 line_base(const struct cp_site *s) { return s->address & ~63UL; }
@@ -663,6 +686,44 @@ static const u8 *chain_read(u64 addr, u32 len)
 }
 static u32 le32(const u8 *p) { return (u32)p[0] | (u32)p[1] << 8 | (u32)p[2] << 16 | (u32)p[3] << 24; }
 static int bad_pointer(u32 v) { return (v & 3) || v < CP_LO || v >= CP_HI; }
+#ifdef MULTI_REC
+/* Find the stored record of each mode in rec_modes through the same chain and fill l5_recs; then the timing variant (the camera computes
+   the records at start-up from its 60 Hz or 50 Hz table) whose stock or new bytes every record holds. 0 on success; 1: a record was not
+   found; 2: not exactly one variant fits every record. Only reads. */
+static int find_record(void)
+{
+    const u8 *p = chain_read(IMAGER, 4);
+    if (!p) return 1;
+    u32 ctrl = le32(p);
+    if (bad_pointer(ctrl) || !(p = chain_read((u64)ctrl + CTRL_DRVPARAM, 4))) return 1;
+    u32 obj = le32(p);
+    if (bad_pointer(obj) || !(p = chain_read(obj, 0x18))) return 1;
+    u32 count = le32(p + 4), ids = le32(p + 8), base = le32(p + 0x10);
+    if (count == 0 || count > 64 || bad_pointer(ids) || bad_pointer(base) || !(p = chain_read(ids, count * 4))) return 1;
+    for (u32 r = 0; r < N_RECS; r++) {
+        u32 index = 0xff;
+        for (u32 i = 0; i < count; i++) if (le32(p + 4 * i) == rec_modes[r] && index == 0xff) index = i;
+        if (index == 0xff) return 1;
+        l5_recs[r].address = (u64)base + index * REC;
+        l5_recs[r].length = REC;
+        l5_recs[r].offs = rec_offs; l5_recs[r].noffs = REC_BYTES;
+        if (l5_recs[r].address + REC > CP_HI) return 1;
+    }
+    u32 fits = 0, which = 0;
+    for (u32 v = 0; v < REC_VARIANTS; v++) {
+        int all = 1;
+        for (u32 r = 0; r < N_RECS && all; r++) {
+            if (site_read(&l5_recs[r])) return 1;
+            if (!site_holds(&l5_recs[r], rec_stock[r][v]) && !site_holds(&l5_recs[r], rec_new[r][v])) all = 0;
+        }
+        if (all) { fits++; which = v; }
+    }
+    if (fits != 1) return 2;
+    l5_variant = which;
+    for (u32 r = 0; r < N_RECS; r++) { l5_recs[r].stock = rec_stock[r][which]; l5_recs[r].changed = rec_new[r][which]; }
+    return 0;
+}
+#else
 /* Find the stored record of MODE_ID and fill l5_rec. 0 on success. */
 static int find_record(void)
 {
@@ -683,6 +744,7 @@ static int find_record(void)
     l5_rec.offs = rec_offs; l5_rec.noffs = REC_BYTES;
     return l5_rec.address + REC > CP_HI;
 }
+#endif
 static void say_site(const char *what, const struct cp_site *s)
 {
     u8 a[4] = { (u8)(s->address >> 24), (u8)(s->address >> 16), (u8)(s->address >> 8), (u8)s->address };
@@ -711,8 +773,16 @@ static void level5(void)
     if (m == -1) { puts_("!! mmap of the buffer failed; nothing is written\n"); sys_close((int)fd); cam_dmm_free(handle); return; }
     l5_buf = (u8 *)m + lead;
 
+#ifdef MULTI_REC
+    int found = find_record();
+    if (found == 1) { puts_("!! a stored record was not found where the pointers lead; nothing is written\n"); goto out; }
+    if (found == 2) { puts_("!! the stored records hold neither timing variant (" REC_VARIANTS_TEXT ") throughout; nothing is written\n"); goto out; }
+    for (u32 r = 0; r < N_RECS; r++) { say_site("stored record", &l5_recs[r]); puts_("mode "); puts_(rec_mode_text[r]); puts_("\n"); }
+    puts_("the stored records are the "); puts_(rec_variant_name[l5_variant]); puts_(" variant; " REC_BYTES_TEXT " bytes of each are a site\n");
+#else
     if (find_record()) { puts_("!! the stored record was not found where the pointers lead; nothing is written\n"); goto out; }
     say_site("stored record of mode " MODE_TEXT " at", &l5_rec); puts_(REC_BYTES_TEXT " of its bytes are a site\n");
+#endif
     puts_("pass 1: read every site; nothing is written unless all are as expected\n");
     u32 todo = 0;
     for (u64 i = 0; i < N_SITES; i++) {
@@ -1120,7 +1190,7 @@ static void level12(void)
 
 /* ------------------------------------------------------------------ level 15: the movie output state, read-only */
 
-#if LEVEL == 15 || LEVEL == 21 || LEVEL == 28
+#if LEVEL == 15 || LEVEL == 21 || LEVEL == 28 || LEVEL == 33 || LEVEL == 34 || LEVEL == 35 || LEVEL == 39
 /* Level 21 is this same code with its own table of ranges: the raw ports' state (the RDC objects of the device group), read-only.
    The three imports, all from libsencore.so (finding F512). The transfer is used with direction 0 only: coprocessor to buffer. */
 extern u64 cam_dmm_alloc(u32 size, u32 *handle) __asm__("_Z9dmm_allocjPj");
@@ -1154,6 +1224,92 @@ static const struct l15_range out_fixed[] = {
     { 0x011fc000U, 0x15000U, "widget_models" },   /* 0x11fc000 to 0x1211000: the four model rings and their index words */
     { 0x00d7b000U, 0x1000U, "frame_tables" },     /* the three tables of expected live-view rectangles */
     { 0x001e4000U, 0x1000U, "vdf_words" },        /* the display's fit-mode table and letterbox constants */
+};
+#elif LEVEL == 33
+#define L15_N "33"
+#define L15_HEAD "== level 33: the tone-curve state, read-only\n"
+/* cpapp-b.bin 6.02 (finding F1043): the picture-quality module's variables, which the firmware's own descriptor tables (0xd1177c and
+   neighbours) name with their addresses, all in 0x1a67000 to 0x1a6dfff: the tone-curve inputs (table number 0x1a68d0c) and the computed
+   curves of the four contexts (inputs, divisions, outputs from 0x1a6a5b8, 0x1a6ab5c, 0x1a6cad0, 0x1a6d074). The pointer table GetMainGamma
+   0x3d06fc picks the curve's source table from (0xfbba78), the S-Log2 and S-Log3 source tables (0xcb2da8 to 0xcb4f2c), the settings block
+   0x10fe5d0, the bytes GetMainGamma reads at 0x14f69bc to 0x14f69cf, and the camera core's context for the mode the camera is in.
+   Nothing is found through a pointer. */
+static const struct l15_range out_fixed[] = {
+    { 0x01a67000U, 0x7000U, "pq_state" },          /* the picture-quality module's inputs and results, with the four computed curves */
+    { 0x00fbb000U, 0x1000U, "curve_pointers" },    /* the curve pointer table 0xfbba78, seven pointers a table number */
+    { 0x00cb2000U, 0x3000U, "slog_tables" },       /* the seven S-Log2 and the seven S-Log3 source tables */
+    { 0x010fe000U, 0x2000U, "settings" },          /* the settings block 0x10fe5d0 (external-table words +0x33c, colour matrix +0xa1e) */
+    { 0x014f6000U, 0x1000U, "curve_globals" },     /* 0x14f69bc to 0x14f69cf */
+    { 0x011d0000U, 0x2000U, "context" },           /* the camera core's context 0x11d0680, as in level 15 */
+};
+#elif LEVEL == 34
+#define L15_N "34"
+#define L15_HEAD "== level 34: the spatial noise-reduction state, read-only\n"
+/* cpapp-b.bin 6.02 (findings F1053, F1054; request 79): the run-time tuning tables CAMNRS::job_YC_CalcParam 0x339d78 and its helpers
+   0x878456 / 0x878858 read (0x12af990 to 0x12b53e3), the picture calculation's input, developer flags and aux (0x1a39080, 0x1a39188,
+   0x1a39360), its double output buffer (0x1a519c8 + 0x1248 x n, the spatial block at +0xcc4) and buffer toggle (0x14eedfc), the
+   calculation's debug copies (0x1a4a8b8 on), the camera context that points at the buffer in use (0x11de450 + 0xb8), the debug settings
+   block (0x143c9a8, the temporal override 0x143ca55) with the two setter arrays (0x143e1b0, 0x143ebc4), and the camera core's context.
+   Nothing is found through a pointer. */
+static const struct l15_range out_fixed[] = {
+    { 0x012af000U, 0x7000U, "nr_tables" },         /* the spatial stage's tuning tables 0x12af990 to 0x12b53e3 */
+    { 0x01a39000U, 0x1000U, "calc_state" },        /* input 0x1a39080 (0x390 bytes), flag block 0x1a39188, aux 0x1a39360 */
+    { 0x01a51000U, 0x3000U, "calc_output" },       /* the two output buffers 0x1a519c8 and 0x1a52c10 (0x1248 bytes each) */
+    { 0x014ee000U, 0x1000U, "calc_toggle" },       /* the buffer toggle 0x14eedfc */
+    { 0x01a4a000U, 0x2000U, "calc_debug" },        /* the calculation's debug copies (0x1a4a8b8, 0x1a4a8e0, 0x1a4b990), when its flag 0x11 is on */
+    { 0x011de000U, 0x1000U, "camera_ctx" },        /* the camera context 0x11de450 (+0xb8: the parameter buffer the apply uses) */
+    { 0x0143c000U, 0x4000U, "settings_setters" },  /* the debug settings block 0x143c9a8 and the setter arrays 0x143e1b0, 0x143ebc4 */
+    { 0x011d0000U, 0x2000U, "context" },           /* the camera core's context 0x11d0680, as in level 15 */
+};
+#elif LEVEL == 35
+#define L15_N "35"
+#define L15_HEAD "== level 35: the display state, read-only\n"
+/* cpapp-b.bin 6.02 (finding F1067; build/disp_state.py has the same table): the memory the display code addresses directly, as whole
+   pages: the writable and the initialised data of the display driver (code 0xaa0000 to 0xad8000), of the display framework VDF (0x1e0000
+   to 0x1e8000, 0x61c000 to 0x640000) and of the InfraBB video code (0x1a0000 to 0x1a8000), and the camera core's context. Two reads, one
+   with Gamma Display Assist off and one with it on, show which bytes follow the setting. Nothing is found through a pointer. */
+static const struct l15_range out_fixed[] = {
+    { 0x01c5c000U, 0x3e000U, "disp_bss" },
+    { 0x01c51000U, 0x1000U, "disp_bss_low" },
+    { 0x01461000U, 0x6000U, "disp_handles" },
+    { 0x014f5000U, 0x5000U, "disp_globals" },
+    { 0x011e6000U, 0x2000U, "disp_state" },
+    { 0x0121f000U, 0x4000U, "vdf_state" },
+    { 0x014b0000U, 0x4000U, "vdf_globals" },
+    { 0x0100d000U, 0x8000U, "disp_data" },
+    { 0x01040000U, 0x5000U, "vdf_data_a" },
+    { 0x0104a000U, 0x2000U, "vdf_data_b" },
+    { 0x0106a000U, 0x4000U, "vdf_data_c" },
+    { 0x01071000U, 0x2000U, "vdf_data_d" },
+    { 0x010ac000U, 0x3000U, "vdf_data_e" },
+    { 0x01033000U, 0x1000U, "shared_data" },
+    { 0x01476000U, 0x1000U, "misc_a" },
+    { 0x01484000U, 0x1000U, "misc_b" },
+    { 0x0150c000U, 0x1000U, "misc_c" },
+    { 0x0155c000U, 0x3000U, "misc_d" },
+    { 0x01562000U, 0x1000U, "misc_e" },
+    { 0x01927000U, 0x2000U, "misc_f" },
+    { 0x011d0000U, 0x2000U, "context" },
+};
+#elif LEVEL == 39
+#define L15_N "39"
+#define L15_HEAD "== level 39: the MBL noise-reduction state, read-only\n"
+/* cpapp-b.bin 6.02 (finding F1214, request 90; build/mbl_state.py has the same table): the second movie noise-reduction stage MBL keeps no
+   copy of its registers, so this level copies what job 0x332838 fills them from: the CCNR tables 0x12b6190 to 0x12b7bf8, the COMMON / YKNR /
+   box / KKNR / CP tables 0x149d318 to 0x14a1180 (the on/off byte of each box 0x149d480), the picture calculation's debug flags (flag 0x1e
+   makes the job copy its block to 0x1a4dc58 and its inputs to 0x1a4f318), those debug copies, KKNR's face slots 0x1a53e58, the movie
+   settings block 0x11cf8b8, the word 0x14e84bc, the camera context 0x11de450 and the camera core's context. Nothing is found through a
+   pointer. */
+static const struct l15_range out_fixed[] = {
+    { 0x012b6000U, 0x2000U, "ccnr_tables" },
+    { 0x0149d000U, 0x5000U, "mbl_tables" },
+    { 0x01296000U, 0x1000U, "debug_flags" },
+    { 0x01a4d000U, 0x3000U, "mbl_debug" },
+    { 0x01a53000U, 0x1000U, "face_slots" },
+    { 0x011cf000U, 0x1000U, "seq_settings" },
+    { 0x014e8000U, 0x1000U, "mbl_misc" },
+    { 0x011de000U, 0x1000U, "camera_ctx" },
+    { 0x011d0000U, 0x2000U, "context" },
 };
 #else
 #define L15_N "15"
@@ -1723,12 +1879,85 @@ static int mp_find_lib(u64 *lo, u64 *hi, char *perms)
     return found;
 }
 
+#ifdef MP_LD
+/* 2026-11-26 (dsqmenu_v1): a table of sites in MP_LIB's data segment, mp_ld[], with their file offsets in mp_ld_foff[]. A site's address in this
+ * process is the start of the library's mapping with file offset 0 (its load base: the first segment has virtual address 0) plus the site's
+ * virtual address. It is used only if one readable mapping of MP_LIB holds the whole site and that mapping's file offset, plus the site's
+ * distance from the mapping's start, gives back the site's file offset; so the bytes are the ones the design names. Nothing else is read. */
+static int mp_ld_line(const char *s, u64 n, u64 at, u64 len, u64 *foff, char *perms)
+{
+    static const char want[] = "/" MP_LIB;
+    u64 w = sizeof want - 1, a, b, off;
+    const char *p = s;
+    if (n < w) return 0;
+    for (u64 k = 0; k < w; k++) if (s[n - w + k] != want[k]) return 0;
+    if (!mp_hex(&p, &a) || *p++ != '-' || !mp_hex(&p, &b) || *p++ != ' ') return 0;
+    for (int k = 0; k < 4; k++) { if (!*p) return 0; perms[k] = *p++; }
+    perms[4] = 0;
+    if (*p++ != ' ' || !mp_hex(&p, &off) || b <= a || at < a || at >= b || len > b - at) return 0;    /* at < b first: b - at must not wrap */
+    *foff = off + (at - a);
+    return 1;
+}
+
+/* 1 if the site at `at` (`len` bytes) lies in a readable mapping of MP_LIB at file offset `foff_want`. */
+__attribute__((noinline)) static int mp_ld_mapped(u64 at, u64 len, u64 foff_want)
+{
+    static u8 buf[4096];
+    static char line[512];
+    char perms[8];
+    u64 n = 0, foff = 0; int found = 0, over = 0;
+    i64 fd = sys_open(TEST_ROOT "/proc/self/maps", F_RDONLY, 0);
+    if (fd < 0) return 0;
+    for (;;) {
+        i64 r = sys_read((int)fd, buf, sizeof buf);
+        if (r <= 0) break;
+        for (i64 i = 0; i < r; i++) {
+            char c = (char)buf[i];
+            if (c != '\n') { if (n + 1 < sizeof line) line[n++] = c; else over = 1; continue; }
+            line[n] = 0;
+            if (!over && !found && mp_ld_line(line, n, at, len, &foff, perms)) found = 1;       /* the first mapping that holds the site */
+            n = 0; over = 0;
+        }
+    }
+    sys_close((int)fd);
+    return found && perms[0] == 'r' && foff == foff_want;
+}
+#endif
+
 #if LEVEL == 18
 static void mp_sum(const char *what, const struct mp_tally *y)
 {
     puts_(what); puts_(": guards "); putnum(y->guards_ok); puts_(" of "); putnum(y->guards); puts_(" as in the file; sites: ");
     putnum(y->stock); puts_(" stock, "); putnum(y->target); puts_(" target, "); putnum(y->other); puts_(" other\n");
 }
+
+#ifdef MP_LD
+/* The data-segment table against this process's memory (see mp_ld_mapped): an entry is read only after its mapping is checked. */
+static void mp_ld_check(u64 base, struct mp_tally *y)
+{
+    u64 n = sizeof mp_ld / sizeof mp_ld[0];
+    puts_(MP_LIB " data segment, at the load base plus the virtual address, "); putnum((i64)n); puts_(" entries\n");
+    for (u64 i = 0; i < n; i++) {
+        const struct mp_site *e = &mp_ld[i];
+        u8 got[16];
+        puts_("  ld "); putnum((i64)i); puts_(e->kind ? " site " : " guard "); mp_putx(e->off); puts_(" "); putnum(e->len);
+        if (e->kind) y->sites++; else y->guards++;
+        if (e->len > 16 || !mp_ld_mapped(base + e->off, e->len, mp_ld_foff[i])) {
+            puts_(" !! not in a readable mapping of " MP_LIB " at its file offset\n"); y->other++; continue;
+        }
+        const volatile u8 *mem = (const volatile u8 *)(base + e->off);
+        for (u32 k = 0; k < e->len; k++) got[k] = mem[k];                     /* read once; what is printed is what was compared */
+        if (!e->kind) {
+            if (mp_eq(got, e->stock, e->len)) { y->guards_ok++; puts_(" SAME "); } else puts_(" DIFFERS ");
+        } else {
+            if (mp_eq(got, e->stock, e->len)) { y->stock++; puts_(" STOCK "); }
+            else if (mp_eq(got, e->changed, e->len)) { y->target++; puts_(" TARGET "); }
+            else { y->other++; puts_(" OTHER "); }
+        }
+        puthex(got, e->len); puts_("\n");
+    }
+}
+#endif
 
 static void level18(void)
 {
@@ -1761,10 +1990,23 @@ static void level18(void)
     }
     mp_sum(MP_LIB, &lm);
 
+#ifdef MP_LD
+    struct mp_tally ld = { 0, 0, 0, 0, 0, 0 };
+    u64 n_ld = sizeof mp_ld / sizeof mp_ld[0];
+    if (lm_read) mp_ld_check(lo, &ld);
+    else puts_("!! the data segment is not read: the load base is not known\n");
+    mp_sum(MP_LIB " data segment", &ld);
+    int whole = av_read && lm_read && av.guards == av.guards_ok && lm.guards == lm.guards_ok && ld.guards == ld.guards_ok
+                && av.sites + lm.sites + ld.sites == n_av + n_lm + n_ld - av.guards - lm.guards - ld.guards;
+    if (whole && !av.target && !av.other && !lm.target && !lm.other && !ld.target && !ld.other) puts_("== level 18 verdict: READY: every guard is as in the file and every site holds the stock bytes\n");
+    else if (whole && !av.stock && !av.other && !lm.stock && !lm.other && !ld.stock && !ld.other) puts_("== level 18 verdict: APPLIED: every guard is as in the file and every site holds the design's bytes\n");
+    else puts_("== level 18 verdict: NOT READY: see the lines above\n");
+#else
     int whole = av_read && lm_read && av.guards == av.guards_ok && lm.guards == lm.guards_ok && av.sites + lm.sites == n_av + n_lm - av.guards - lm.guards;
     if (whole && !av.target && !av.other && !lm.target && !lm.other) puts_("== level 18 verdict: READY: every guard is as in the file and every site holds the stock bytes\n");
     else if (whole && !av.stock && !av.other && !lm.stock && !lm.other) puts_("== level 18 verdict: APPLIED: every guard is as in the file and every site holds the design's bytes\n");
     else puts_("== level 18 verdict: NOT READY: see the lines above\n");
+#endif
 }
 #endif
 #endif
@@ -2263,6 +2505,10 @@ close:
 #endif
 typedef char mp_av_fits[(sizeof mp_av / sizeof mp_av[0]) <= MP_MAX ? 1 : -1];
 typedef char mp_lm_fits[(sizeof mp_lm / sizeof mp_lm[0]) <= MP_MAX ? 1 : -1];
+#ifdef MP_LD
+typedef char mp_ld_fits[(sizeof mp_ld / sizeof mp_ld[0]) <= MP_MAX ? 1 : -1];
+typedef char mp_ld_foff_fits[(sizeof mp_ld_foff / sizeof mp_ld_foff[0]) == (sizeof mp_ld / sizeof mp_ld[0]) ? 1 : -1];
+#endif
 #define NR_pread64 67
 #define NR_pwrite64 68
 #define F_RDWR 2                           /* O_RDWR, and no O_SYNC: see level19() */
@@ -2312,6 +2558,12 @@ static int mp_refuse(const char *tag, const struct mp_site *e, const char *why)
 }
 
 static u8 mp_do_av[MP_MAX], mp_do_lm[MP_MAX];          /* per entry: 0 leave, 1 to write, 2 touched by this run */
+#ifdef MP_LD
+static u8 mp_do_ld[MP_MAX];
+
+/* Pass 1 for the data-segment table: each entry's mapping is checked (mp_ld_mapped), then the entry is judged as mp_pass1 judges one. */
+static int mp_ld_pass1(u64 base, u32 *n_todo);
+#endif
 
 /* Pass 1 for one table: nothing is written. Returns 0 after reporting the first thing that is not as it must be. */
 static int mp_pass1(const char *tag, const struct mp_site *t, u64 n, u8 *todo, const volatile u8 *mem, u64 first, u64 span, int fd, u32 *n_todo)
@@ -2337,6 +2589,19 @@ static int mp_pass1(const char *tag, const struct mp_site *t, u64 n, u8 *todo, c
     return 1;
 }
 
+#ifdef MP_LD
+__attribute__((noinline)) static int mp_ld_pass1(u64 base, u32 *n_todo)
+{
+    const struct mp_site *e = mp_ld;                     /* stepped as a pointer: no table stride is kept in a register across the checks */
+    for (u64 i = 0; i < sizeof mp_ld / sizeof mp_ld[0]; i++, e++) {
+        mp_do_ld[i] = 0;
+        if (e->len > 16 || !mp_ld_mapped(base + e->off, e->len, mp_ld_foff[i])) return mp_refuse("ld", e, "is not in a readable mapping of " MP_LIB " at its file offset");
+        if (!mp_pass1("ld", e, 1, &mp_do_ld[i], (const volatile u8 *)(base + e->off), e->off, e->len, -1, n_todo)) return 0;
+    }
+    return 1;
+}
+#endif
+
 static void mp_run(volatile u8 *av, int fd, int pm, u64 lo, u64 hi)
 {
     u64 n_av = sizeof mp_av / sizeof mp_av[0], n_lm = sizeof mp_lm / sizeof mp_lm[0];
@@ -2344,6 +2609,10 @@ static void mp_run(volatile u8 *av, int fd, int pm, u64 lo, u64 hi)
     int failed = 0, undo_bad = 0;
     if (!mp_pass1("av", mp_av, n_av, mp_do_av, av, MP_AV_FIRST, MP_AV_BYTES, fd, &n_todo)) return;
     if (!mp_pass1("lm", mp_lm, n_lm, mp_do_lm, (const volatile u8 *)lo, 0, hi - lo, -1, &n_todo)) return;
+#ifdef MP_LD
+    u64 n_ld = sizeof mp_ld / sizeof mp_ld[0];
+    if (!mp_ld_pass1(lo, &n_todo)) return;
+#endif
     puts_("checks passed: every guard is as in the file, every site holds one of the two sets of bytes, and the kernel's own view of av-cam.bin equals the mapping\n");
     if (!n_todo) { puts_("NOTHING TO DO: every site already holds the target bytes (" MP_VERB ")\n"); return; }
 
@@ -2368,9 +2637,28 @@ static void mp_run(volatile u8 *av, int fd, int pm, u64 lo, u64 hi)
         else if (!mp_lm_is(lo, e, MP_TO(e))) { puts_("!! "); mp_where("lm", e); puts_(": the write is not seen in the process's memory\n"); failed = 1; }
         else { mp_where("lm", e); puts_(": written and read back\n"); }
     }
+#ifdef MP_LD
+    for (u64 i = 0; i < n_ld && !failed; i++) {               /* the data segment last; written as the code and table sites are, through /proc/self/mem */
+        const struct mp_site *e = &mp_ld[i];
+        if (mp_do_ld[i] != 1) continue;
+        mp_do_ld[i] = 2;
+        if (!mp_lm_put(pm, lo, e, MP_TO(e))) { puts_("!! "); mp_where("ld", e); puts_(": the write through /proc/self/mem failed\n"); failed = 1; }
+        else if (!mp_lm_is(lo, e, MP_TO(e))) { puts_("!! "); mp_where("ld", e); puts_(": the write is not seen in the process's memory\n"); failed = 1; }
+        else { mp_where("ld", e); puts_(": written and read back\n"); }
+    }
+#endif
     if (!failed) { puts_("DONE: every site holds the target bytes (" MP_VERB ")\n"); return; }
 
     /* Something failed: put back every site this run touched, libmpr.so first, and say what each holds afterwards. */
+#ifdef MP_LD
+    for (u64 i = 0; i < n_ld; i++) {                           /* the data segment first: the reverse of the writes */
+        const struct mp_site *e = &mp_ld[i];
+        if (mp_do_ld[i] != 2) continue;
+        mp_lm_put(pm, lo, e, MP_FROM(e));
+        if (mp_lm_is(lo, e, MP_FROM(e))) { puts_("undo "); mp_where("ld", e); puts_(": put back\n"); }
+        else { puts_("!! undo "); mp_where("ld", e); puts_(": NOT put back\n"); undo_bad = 1; }
+    }
+#endif
 #ifdef MP_LM_ORDERED                       /* an undo runs opposite to the writes: branches out before the code they point at */
     for (u64 k = 0; k < n_lm; k++) {
         u64 i = LEVEL == 19 ? n_lm - 1 - k : k;
@@ -2418,6 +2706,247 @@ static void level19(void)
         }
     }
     sys_munmap((void *)m, MP_AV_BYTES);
+    sys_close((int)fd);
+}
+#endif
+
+/* ------------------------------------------------------------------ levels 29 and 30: code and data sites of av-cam.bin, applied or put back */
+
+/* av-cam.bin runs in the kernel at AD_KVA + file offset (liro.ko loads it at AVCAM_PHYS). Its data is written as level 19 writes it; its code is
+ * a new kind of write here, kernel text: a processor may have the old instruction in its instruction cache or its pipeline, and a virtually
+ * indexed instruction cache files a line under the address it was fetched at. So:
+ *   - the code page is mapped at a user address with the kernel address's offset from an AD_ALIGN boundary (2 MB), so that an invalidation
+ *     through this mapping reaches the index the kernel's fetches use; an instruction cache that CTR_EL0 calls neither PIPT nor VIPT is refused;
+ *   - each site is one aligned 32-bit store: no processor can see half an instruction;
+ *   - after the code writes, each site's line is cleaned to the point of unification and the instruction cache invalidated at it, both
+ *     broadcast to every processor (inner shareable), then dsb ish and isb (ad_sync);
+ *   - the whole maintenance sequence runs once before anything is written: if this processor did not allow it from this process, the
+ *     process would end there, with nothing changed;
+ *   - order: apply writes the code sites first and the data sites last; put back the data first and the code last (the design's rule: no state
+ *     between the two halves may be worse than stock). An undo runs as a put back does.
+ * Every byte of the code page apart from the sites must be as in the file, in the mapping and in the kernel's own view; the data entries are
+ * checked as level 19 checks its tables. The change does not survive a cold boot. */
+#if LEVEL == 29 || LEVEL == 30
+#ifndef AD_H
+#error "levels 29 and 30 need -DAD_H with the header that helper_fx3/gen_fx3_write.py writes for an av-cam.bin code design"
+#endif
+#ifndef AVCAM_PHYS
+#error "levels 29 and 30 need -DAVCAM_PHYS=<physical load address of av-cam.bin>"
+#endif
+#include AD_H                              /* AD_DESIGN, AD_KVA, AD_CODE_PAGE, AD_DATA_PAGE, AD_ALIGN, struct ad_site, ad_code[], ad_data[], ad_code_file[] */
+#if LEVEL == 29
+#define AD_FROM(e) ((e)->stock)
+#define AD_TO(e) ((e)->changed)
+#define AD_VERB "apply"
+#else
+#define AD_FROM(e) ((e)->changed)
+#define AD_TO(e) ((e)->stock)
+#define AD_VERB "put back"
+#endif
+#define NR_pread64 67
+#define F_RDWR 2                           /* O_RDWR, and no O_SYNC: a cached mapping, as the kernel's own map is (see level19()) */
+#define AD_PAGE 0x1000UL
+#define AD_NC (sizeof ad_code / sizeof ad_code[0])
+#define AD_ND (sizeof ad_data / sizeof ad_data[0])
+_Static_assert(AD_NC >= 1 && AD_NC <= 16 && AD_ND >= 1 && AD_ND <= 16, "small tables");
+_Static_assert(AD_CODE_PAGE % AD_PAGE == 0 && AD_DATA_PAGE % AD_PAGE == 0 && AD_CODE_PAGE != AD_DATA_PAGE, "two whole pages");
+_Static_assert(AD_ALIGN >= AD_PAGE && (AD_ALIGN & (AD_ALIGN - 1)) == 0 && AD_KVA % AD_ALIGN == 0, "the alias rule");
+
+static void ad_putx(u64 v)
+{
+    u8 be[8]; int k = 0;
+    for (int i = 0; i < 8; i++) be[i] = (u8)(v >> (8 * (7 - i)));
+    while (k < 7 && !be[k]) k++;
+    puts_("0x"); puthex(be + k, (u64)(8 - k));
+}
+
+static int ad_eq(const u8 *a, const volatile u8 *b, u32 n)
+{
+    for (u32 i = 0; i < n; i++) if (a[i] != b[i]) return 0;
+    return 1;
+}
+
+/* The kernel's own view of physical memory, as level 19's mp_kview. The only place in this level that makes this call. */
+__attribute__((noinline)) static int ad_kview(int fd, u64 phys, u8 *out, u32 len)
+{
+    return sc(NR_pread64, fd, (i64)out, (i64)len, (i64)phys, 0, 0) == (i64)len;
+}
+
+/* The cache type register as this process reads it (Linux sets SCTLR_EL1.UCT, or answers the read itself). */
+__attribute__((noinline)) static u64 ad_ctr(void)
+{
+    u64 v;
+    __asm__ volatile("mrs %0, ctr_el0" : "=r"(v));
+    return v;
+}
+
+/* The code page, mapped read-write over part of a reservation at `va`. With level 19's sys_mmap_rw, the only writable mapping calls of this level. */
+__attribute__((noinline)) static i64 ad_map_code(int fd, u64 va)
+{
+    i64 r = sc(NR_mmap, (i64)va, (i64)AD_PAGE, 3 /* PROT_READ | PROT_WRITE */, 0x11 /* MAP_SHARED | MAP_FIXED */, fd, (i64)((u64)AVCAM_PHYS + AD_CODE_PAGE));
+    return (r < 0 && r > -4096) ? -1 : r;
+}
+
+/* The only place that makes the processors fetch the code sites afresh. `code` is the code page in this process. */
+__attribute__((noinline)) static void ad_sync(volatile u8 *code)
+{
+    for (u64 i = 0; i < AD_NC; i++) __asm__ volatile("dc cvau, %0" : : "r"(code + (ad_code[i].off - AD_CODE_PAGE)) : "memory");
+    __asm__ volatile("dsb ish" : : : "memory");
+    for (u64 i = 0; i < AD_NC; i++) __asm__ volatile("ic ivau, %0" : : "r"(code + (ad_code[i].off - AD_CODE_PAGE)) : "memory");
+    __asm__ volatile("dsb ish" : : : "memory");
+    __asm__ volatile("isb" : : : "memory");
+}
+
+static u8 ad_kpage[AD_PAGE];
+static u8 ad_do_c[16], ad_do_d[16];        /* per entry: 0 leave, 1 to write, 2 touched by this run */
+
+static int ad_refuse(const char *tag, u64 off, const char *why)
+{
+    puts_("!! "); puts_(tag); puts_(" "); ad_putx(off); puts_(": "); puts_(why); puts_("; nothing is written\n");
+    return 0;
+}
+
+/* A site: one aligned instruction or data word in the page. */
+static int ad_site_ok(const struct ad_site *e, u64 page)
+{
+    return e->kind && e->len == 4 && !(e->off & 3) && e->off >= page && e->off + 4 <= page + AD_PAGE;
+}
+
+/* Pass 1 for one table: nothing is written. Code: the whole page in both views, every byte outside the sites as in the file. Data: each entry
+ * in both views (the rest of a data page may change while it is read). Returns 0 after reporting the first thing that is not as it must be. */
+static int ad_pass1(const char *tag, const struct ad_site *t, u64 n, u8 *todo, const volatile u8 *mem, u64 page, int fd, u32 *n_todo)
+{
+    if (page == AD_CODE_PAGE) {
+        if (!ad_kview(fd, (u64)AVCAM_PHYS + page, ad_kpage, AD_PAGE)) return ad_refuse(tag, page, "the kernel's own view of the page cannot be read");
+        for (u64 k = 0; k < AD_PAGE; k++) {
+            int in_site = 0;
+            if (mem[k] != ad_kpage[k]) return ad_refuse(tag, page + k, "the kernel's own view differs from the mapping");
+            for (u64 i = 0; i < n; i++) if (page + k >= t[i].off && page + k < t[i].off + t[i].len) in_site = 1;
+            if (!in_site && ad_kpage[k] != ad_code_file[k]) return ad_refuse(tag, page + k, "is not as in the file");
+        }
+    }
+    for (u64 i = 0; i < n; i++) {
+        const struct ad_site *e = &t[i];
+        u8 kv[16];
+        todo[i] = 0;
+        if (e->len > 16 || e->off < page || e->off + e->len > page + AD_PAGE) return ad_refuse(tag, e->off, "lies outside its page");
+        if (e->kind && !ad_site_ok(e, page)) return ad_refuse(tag, e->off, "is not one aligned word");
+        if (page == AD_CODE_PAGE && !e->kind) return ad_refuse(tag, e->off, "a guard in the code page (the whole page is the guard)");
+        if (!ad_kview(fd, (u64)AVCAM_PHYS + e->off, kv, e->len)) return ad_refuse(tag, e->off, "the kernel's own view cannot be read");
+        if (!ad_eq(kv, mem + (e->off - page), e->len)) return ad_refuse(tag, e->off, "the kernel's own view differs from the mapping");
+        if (!e->kind) {
+            if (!ad_eq(e->stock, mem + (e->off - page), e->len)) return ad_refuse(tag, e->off, "is not as in the file");
+            continue;
+        }
+        if (ad_eq(AD_FROM(e), mem + (e->off - page), 4)) { todo[i] = 1; (*n_todo)++; puts_(tag); puts_(" site "); ad_putx(e->off); puts_(": as expected\n"); }
+        else if (ad_eq(AD_TO(e), mem + (e->off - page), 4)) { puts_(tag); puts_(" site "); ad_putx(e->off); puts_(": already holds the target bytes\n"); }
+        else return ad_refuse(tag, e->off, "holds neither set of bytes");
+    }
+    return 1;
+}
+
+static u32 ad_w32(const u8 *b) { return (u32)b[0] | (u32)b[1] << 8 | (u32)b[2] << 16 | (u32)b[3] << 24; }
+
+/* Both views hold `bytes`: the mapping, and the kernel's own. */
+static int ad_is(const volatile u8 *mem, u64 page, int fd, const struct ad_site *e, const u8 *bytes)
+{
+    u8 kv[4];
+    return ad_eq(bytes, mem + (e->off - page), 4) && ad_kview(fd, (u64)AVCAM_PHYS + e->off, kv, 4) && ad_eq(bytes, kv, 4);
+}
+
+/* The writes of one table: each marked site, one aligned 32-bit store, read back in both views. Returns 0 at the first that is not seen. */
+static int ad_write(const char *tag, const struct ad_site *t, u64 n, u8 *todo, volatile u8 *mem, u64 page, int fd)
+{
+    for (u64 i = 0; i < n; i++) {
+        const struct ad_site *e = &t[i];
+        if (todo[i] != 1) continue;
+        todo[i] = 2;                                   /* touched: the undo covers it even if the write is seen in one view only */
+        *(volatile u32 *)(mem + (e->off - page)) = ad_w32(AD_TO(e));
+        if (!ad_is(mem, page, fd, e, AD_TO(e))) {
+            puts_("!! "); puts_(tag); puts_(" site "); ad_putx(e->off); puts_(": the write is not seen both in the mapping and in the kernel's own view\n");
+            return 0;
+        }
+        puts_(tag); puts_(" site "); ad_putx(e->off); puts_(": written and read back\n");
+    }
+    return 1;
+}
+
+static int ad_undo(const char *tag, const struct ad_site *t, u64 n, const u8 *todo, volatile u8 *mem, u64 page, int fd)
+{
+    int ok = 1;
+    for (u64 i = 0; i < n; i++) {
+        const struct ad_site *e = &t[i];
+        if (todo[i] != 2) continue;
+        *(volatile u32 *)(mem + (e->off - page)) = ad_w32(AD_FROM(e));
+        if (ad_is(mem, page, fd, e, AD_FROM(e))) { puts_("undo "); puts_(tag); puts_(" site "); ad_putx(e->off); puts_(": put back\n"); }
+        else { puts_("!! undo "); puts_(tag); puts_(" site "); ad_putx(e->off); puts_(": NOT put back\n"); ok = 0; }
+    }
+    return ok;
+}
+
+static void ad_run(volatile u8 *code, volatile u8 *data, int fd)
+{
+    u32 n_todo = 0;
+    int ok;
+    if (!ad_pass1("code", ad_code, AD_NC, ad_do_c, code, AD_CODE_PAGE, fd, &n_todo)) return;
+    if (!ad_pass1("data", ad_data, AD_ND, ad_do_d, data, AD_DATA_PAGE, fd, &n_todo)) return;
+    puts_("checks passed: the code page is as in the file apart from the sites, every guard is as in the file, every site holds one of the two sets of bytes, "
+          "and the kernel's own view equals the mappings\n");
+    ad_sync(code);                                     /* the probe: on the sites as they are, before anything is written */
+    puts_("cache maintenance at the code sites: allowed (run once before any write)\n");
+    if (!n_todo) { puts_("NOTHING TO DO: every site already holds the target bytes (" AD_VERB ")\n"); return; }
+#if LEVEL == 29
+    ok = ad_write("code", ad_code, AD_NC, ad_do_c, code, AD_CODE_PAGE, fd);
+    ad_sync(code);
+    if (ok) {
+        puts_("instruction caches: the code sites cleaned and invalidated on every processor\n");
+        ok = ad_write("data", ad_data, AD_ND, ad_do_d, data, AD_DATA_PAGE, fd);
+    }
+#else
+    ok = ad_write("data", ad_data, AD_ND, ad_do_d, data, AD_DATA_PAGE, fd);
+    if (ok) {
+        ok = ad_write("code", ad_code, AD_NC, ad_do_c, code, AD_CODE_PAGE, fd);
+        ad_sync(code);
+        if (ok) puts_("instruction caches: the code sites cleaned and invalidated on every processor\n");
+    }
+#endif
+    if (ok) { puts_("DONE: every site holds the target bytes (" AD_VERB ")\n"); return; }
+
+    /* Something failed: put back every site this run touched, as a put back runs (data first, then code, then the caches). */
+    ok = ad_undo("data", ad_data, AD_ND, ad_do_d, data, AD_DATA_PAGE, fd);
+    ok = ad_undo("code", ad_code, AD_NC, ad_do_c, code, AD_CODE_PAGE, fd) && ok;
+    ad_sync(code);
+    puts_(!ok ? "UNDO INCOMPLETE: main-processor memory may be partly changed; cold boot the camera before anything else\n"
+              : "NOT DONE: a step failed; every site this run touched was put back\n");
+}
+
+static void level29(void)
+{
+    puts_("== level " RC_STR(LEVEL) ": " AD_VERB " the av-cam.bin code and data sites of " AD_DESIGN "\n");
+    copy_file(TEST_ROOT "/proc/cpuinfo", 8192);        /* for the record: which processors */
+    u64 ctr = ad_ctr();
+    u32 l1ip = (u32)(ctr >> 14) & 3;
+    puts_("CTR_EL0 "); ad_putx(ctr);
+    puts_(l1ip == 3 ? ": instruction cache PIPT\n" : l1ip == 2 ? ": instruction cache VIPT\n" : ": instruction cache neither PIPT nor VIPT\n");
+    if (l1ip < 2) { puts_("!! the instruction cache of this kind is not reached through another mapping; nothing is written\n"); return; }
+    i64 fd = sys_open(TEST_ROOT "/dev/mem", F_RDWR, 0);
+    if (fd < 0) { puts_("!! /dev/mem open failed "); putnum(fd); puts_("; nothing is written\n"); return; }
+    /* Address space for the code page: a reservation one page larger than AD_ALIGN, of which one page is then mapped over. */
+    i64 res = sc(NR_mmap, 0, (i64)(AD_ALIGN + AD_PAGE), 0 /* PROT_NONE */, 0x22 /* MAP_PRIVATE | MAP_ANONYMOUS */, -1, 0);
+    if (res < 0 && res > -4096) { puts_("!! no address space for the code page; nothing is written\n"); sys_close((int)fd); return; }
+    u64 want = (AD_KVA + AD_CODE_PAGE) & (AD_ALIGN - 1);
+    u64 va = (u64)res + ((want - (u64)res) & (AD_ALIGN - 1));
+    i64 c = ad_map_code((int)fd, va), d = -1;
+    if (c == -1 || (u64)c != va) puts_("!! the code page cannot be mapped at the address chosen; nothing is written\n");
+    else if (((u64)c ^ (AD_KVA + AD_CODE_PAGE)) & (AD_ALIGN - 1)) puts_("!! the code page's address does not keep the kernel's offset; nothing is written\n");
+    else if ((d = sys_mmap_rw((int)fd, AD_PAGE, (u64)AVCAM_PHYS + AD_DATA_PAGE)) == -1) puts_("!! the data page cannot be mapped; nothing is written\n");
+    else {
+        puts_("av-cam.bin at physical "); ad_putx((u64)AVCAM_PHYS); puts_("; code page "); ad_putx(AD_CODE_PAGE); puts_(" (kernel "); ad_putx(AD_KVA + AD_CODE_PAGE);
+        puts_(") mapped at "); ad_putx((u64)c); puts_(", data page "); ad_putx(AD_DATA_PAGE); puts_(" at "); ad_putx((u64)d); puts_("\n");
+        ad_run((volatile u8 *)c, (volatile u8 *)d, (int)fd);
+    }
+    if (d != -1) sys_munmap((void *)d, AD_PAGE);
+    sys_munmap((void *)res, AD_ALIGN + AD_PAGE);           /* the code page's mapping goes with the reservation */
     sys_close((int)fd);
 }
 #endif
@@ -2632,6 +3161,585 @@ static void level24(void)
 #endif
 #endif
 
+/* ------------------------------------------------------------------ level 31: spans of DRAM (a picture buffer), read-only */
+
+/* After a recording the encoder's per-picture buffers (the codec's 'original0' pictures, in DMM blocks of DRAM) still hold the last
+ * pictures until something else uses that memory. This level copies fixed spans of them out, nothing else: the span table comes from
+ * a design (gen_expected.py --dump <name>, which checks each span against the main processor's DmmCfg). Every span is checked before
+ * anything is read: 64-byte aligned, inside DRAM 0x400000000-0x4ffffffff, at most 256 KB, at most 1.5 MB in all; otherwise nothing is
+ * read. /dev/mem is opened read-only with O_SYNC as levels 22 and 26 open it, so a mapping is uncached (or device memory where the
+ * kernel has no linear map); each span is copied with aligned 64-bit loads into a 4 KB buffer of this file, and only that buffer is
+ * written out, so the kernel never copies from the mapping itself. No codec register, no write mapping, no other file. */
+#if LEVEL == 31
+#ifndef DUMP_H
+#error "level 31 needs -DDUMP_H=\"expected_dump_<name>.h\" (gen_expected.py --dump <name>)"
+#endif
+#include DUMP_H                            /* DUMP_DESIGN, struct dump_span { u64 phys; u32 len; u32 block; const char *what; }, dump_spans[] */
+#define D_SYNC     (0 | 0x101000)          /* O_RDONLY | O_SYNC */
+#define D_DRAM_LO  0x400000000UL
+#define D_DRAM_HI  0x500000000UL
+#define D_SPAN_MAX 0x40000UL               /* 256 KB a span */
+#define D_ALL_MAX  0x180000UL              /* 1.5 MB in all */
+#define D_N (sizeof dump_spans / sizeof dump_spans[0])
+_Static_assert(D_N >= 1 && D_N <= 64, "a short span table");
+
+static u64 d_buf[512];                     /* 4 KB */
+
+static void d_x64(u64 v) { u8 b[8]; for (int i = 0; i < 8; i++) b[i] = (u8)(v >> (8 * (7 - i))); puts_("0x"); puthex(b, 8); }
+
+static void level31(void)
+{
+    puts_("== level 31: spans of DRAM, read-only (" DUMP_DESIGN ")\n");
+    u64 all = 0;
+    for (u64 k = 0; k < D_N; k++) {
+        const struct dump_span *s = &dump_spans[k];
+        if (s->phys < D_DRAM_LO || s->phys >= D_DRAM_HI || s->len > D_DRAM_HI - s->phys || (s->phys & 63) || !s->len || (s->len & 63)
+            || s->len > D_SPAN_MAX) {
+            puts_("!! span "); putnum((i64)k); puts_(" is not a 64-byte aligned piece of DRAM of at most 256 KB; nothing is read\n");
+            puts_("== level 31 verdict: NOTHING READ\n");
+            return;
+        }
+        all += s->len;
+    }
+    if (all > D_ALL_MAX) { puts_("!! the spans add up to more than 1.5 MB; nothing is read\n== level 31 verdict: NOTHING READ\n"); return; }
+    i64 fd = sys_open(TEST_ROOT "/dev/mem", D_SYNC, 0);          /* read-only: this descriptor cannot be mapped for writing */
+    if (fd < 0) { puts_("!! /dev/mem open failed "); putnum(fd); puts_("\n== level 31 verdict: NOTHING READ\n"); return; }
+    u64 got = 0;
+    for (u64 k = 0; k < D_N; k++) {
+        const struct dump_span *s = &dump_spans[k];
+        u64 page = s->phys & ~0xFFFUL, lead = s->phys - page, maplen = (lead + s->len + 0xFFFUL) & ~0xFFFUL;
+        puts_("== span "); putnum((i64)k); puts_(" block "); putnum((i64)s->block); puts_(" "); puts_(s->what); puts_(" phys "); d_x64(s->phys);
+        i64 m = sys_mmap_ro((int)fd, maplen, page);
+        if (m == -1) { puts_("\n!! mmap failed\n"); continue; }
+        puts_(" raw "); putnum((i64)s->len); puts_(" bytes follow\n");
+        for (u64 off = 0; off < s->len; off += sizeof d_buf) {
+            u64 n = s->len - off < sizeof d_buf ? s->len - off : sizeof d_buf;
+            const volatile u64 *src = (const volatile u64 *)(m + (i64)(lead + off));
+            for (u64 w = 0; w < n / 8; w++) d_buf[w] = src[w];
+            put(d_buf, n);
+        }
+        puts_("\n== span end\n");
+        sys_munmap((void *)m, maplen);
+        got++;
+    }
+    sys_close((int)fd);
+    puts_("== level 31 verdict: "); putnum((i64)got); puts_(" of "); putnum((i64)D_N); puts_(" spans read\n");
+}
+#endif
+
+/* ------------------------------------------------------------------ level 32: the hand-off fixture, written into DRAM (picture slot 0) */
+
+/* With vcd12_ho5_v1 / vcd12_ho2_v1 applied, the input front end of a CD-mode-2 channel (XAVC S-I HD with ebccd2si_v1) writes picture slot 1
+ * of block 0x664, while the encoder core still reads slot 0 (F1021, build/build_vcd12.py). This level puts a known picture into slot 0:
+ * the fixture of a design (gen_expected.py --fixture <name>, handoff_fixture.py), built record by record in the mode-2 layout from a
+ * 17 x 30 tile table. Before anything is written, the head of slot 1's Y and C (16 KB each) must hold the front end's picture: every
+ * spare bit zero and at least 8 distinct sample values; otherwise nothing is written. /dev/mem is opened read-write with O_SYNC, so a
+ * mapping is uncached and each store reaches DRAM, where the codec's DMA reads it. Mapped for writing: exactly the pages of the two planes,
+ * nothing else; each plane is read back and its FNV-1a sum compared with the design's. No register, no other file. */
+#if LEVEL == 32
+#ifndef FIX_H
+#error "level 32 needs -DFIX_H=\"expected_fix_<name>.h\" (gen_expected.py --fixture <name>)"
+#endif
+#include FIX_H                             /* FIX_DESIGN, FIX_Y_PHYS, FIX_C_PHYS, FIX_PLANE, FIX_GY_PHYS, FIX_GC_PHYS, FIX_GLEN, FIX_SUM_Y, FIX_SUM_C, fix_val, fix_spare */
+#define X_RW_SYNC  (2 | 0x101000)          /* O_RDWR | O_SYNC */
+#define X_DRAM_LO  0x400000000UL
+#define X_DRAM_HI  0x500000000UL
+_Static_assert(FIX_PLANE == 1920UL * 1088UL * 2UL, "one 1920 x 1088 plane of 2-byte samples");
+_Static_assert((FIX_Y_PHYS & 31) == 0 && (FIX_C_PHYS & 31) == 0 && (FIX_GY_PHYS & 31) == 0 && (FIX_GC_PHYS & 31) == 0 && (FIX_GLEN & 31) == 0, "records are 32 bytes");
+_Static_assert(FIX_Y_PHYS + FIX_PLANE <= FIX_GY_PHYS && FIX_C_PHYS + FIX_PLANE <= FIX_GC_PHYS && FIX_Y_PHYS + FIX_PLANE <= FIX_C_PHYS, "the planes do not reach the guards or each other");
+_Static_assert(FIX_ROWS == 17 && FIX_COLS == 30, "the fixture is 17 x 30 tiles of 64 x 64");
+
+static void x_x64(u64 v) { u8 b[8]; for (int i = 0; i < 8; i++) b[i] = (u8)(v >> (8 * (7 - i))); puts_("0x"); puthex(b, 8); }
+
+static int x_in_dram(u64 a, u64 n) { return a >= X_DRAM_LO && a < X_DRAM_HI && n <= X_DRAM_HI - a && n; }
+
+/* The four 64-bit words of record r of a plane (16 samples of one stored row): the low bytes, then the high bytes (bits 9..8 of the value
+ * in bits 7..6, the spare bits in 5..0). Y: one value for the whole record; C: words alternate Cb, Cr. */
+static void x_record(u64 r, int chroma, u64 *w)
+{
+    u64 tile = r >> 6, s = r & 63, b = s >> 2, rr = s & 3;
+    u64 trow = tile / 30, tcol = tile % 30, flip = trow & 1;
+    u64 bx = (b & 1) | ((((b >> 2) ^ flip) & 1) << 1);
+    u64 by = ((b >> 3) & 1) | ((((b >> 1) ^ (b >> 2)) & 1) << 1);
+    u64 x0 = tcol * 64 + bx * 16, y = trow * 16 + by * 4 + rr;
+    u64 fr = y / 64, fc = x0 / 64;
+    if (fr > FIX_ROWS - 1) fr = FIX_ROWS - 1;
+    if (!chroma) {
+        u64 v = fix_val[fr][fc][0], sp = fix_spare[fr][fc][0];
+        u64 lo = (v & 0xFF) * 0x0101010101010101UL, hi = (((v >> 8) & 3) << 6 | sp) * 0x0101010101010101UL;
+        w[0] = lo; w[1] = lo; w[2] = hi; w[3] = hi;
+    } else {
+        u64 vb = fix_val[fr][fc][1], vr = fix_val[fr][fc][2], sb = fix_spare[fr][fc][1], sr = fix_spare[fr][fc][2];
+        u64 lo = ((vb & 0xFF) | (vr & 0xFF) << 8) * 0x0001000100010001UL;
+        u64 hi = ((((vb >> 8) & 3) << 6 | sb) | (((vr >> 8) & 3) << 6 | sr) << 8) * 0x0001000100010001UL;
+        w[0] = lo; w[1] = lo; w[2] = hi; w[3] = hi;
+    }
+}
+
+/* A read-only look at n bytes of mode-2 records: samples whose spare bits are set, distinct 10-bit values, the first 32 bytes.
+ * Returns -1 if the mapping fails, else 1 when it is the front end's picture (no spare bit, at least 8 values). */
+static int x_look(int fd, u64 phys, u64 n, const char *what)
+{
+    u64 page = phys & ~0xFFFUL, lead = phys - page, maplen = (lead + n + 0xFFFUL) & ~0xFFFUL;
+    puts_(what); puts_(" phys "); x_x64(phys); puts_(" "); putnum((i64)n); puts_(" bytes: ");
+    i64 m = sys_mmap_ro(fd, maplen, page);
+    if (m == -1) { puts_("!! mmap failed\n"); return -1; }
+    const volatile u64 *p = (const volatile u64 *)(m + (i64)lead);
+    u64 seen[16] = { 0 }, spare = 0, head[4];
+    for (u64 r = 0; r < n / 32; r++) {
+        u64 lo0 = p[4 * r], lo1 = p[4 * r + 1], hi0 = p[4 * r + 2], hi1 = p[4 * r + 3];
+        if (r == 0) { head[0] = lo0; head[1] = lo1; head[2] = hi0; head[3] = hi1; }
+        for (int j = 0; j < 16; j++) {
+            u64 lo = (j < 8 ? lo0 >> (8 * j) : lo1 >> (8 * (j - 8))) & 0xFF, hi = (j < 8 ? hi0 >> (8 * j) : hi1 >> (8 * (j - 8))) & 0xFF;
+            if (hi & 0x3F) spare++;
+            u64 v = lo | (hi >> 6) << 8;
+            seen[v >> 6] |= 1UL << (v & 63);
+        }
+    }
+    sys_munmap((void *)m, maplen);
+    u64 distinct = 0;
+    for (int k = 0; k < 16; k++) { u64 x = seen[k]; while (x) { x &= x - 1; distinct++; } }
+    putnum((i64)(n / 2)); puts_(" samples, spare bits set in "); putnum((i64)spare); puts_(", "); putnum((i64)distinct); puts_(" distinct values; first 32 bytes ");
+    u8 hb[32];
+    for (int k = 0; k < 4; k++) for (int i = 0; i < 8; i++) hb[8 * k + i] = (u8)(head[k] >> (8 * i));
+    puthex(hb, 32); puts_("\n");
+    return !spare && distinct >= 8;
+}
+
+/* Write one plane through a read-write mapping of exactly its pages, then read it back through the same mapping into the sum. */
+static int x_plane(int fd, u64 phys, int chroma, u64 want, const char *what)
+{
+    u64 page = phys & ~0xFFFUL, lead = phys - page, maplen = (lead + FIX_PLANE + 0xFFFUL) & ~0xFFFUL;
+    puts_("write "); puts_(what); puts_(" phys "); x_x64(phys); puts_(" "); putnum((i64)FIX_PLANE); puts_(" bytes");
+    i64 m = sys_mmap_rw(fd, maplen, page);
+    if (m == -1) { puts_(": !! mmap failed, nothing written\n"); return -1; }
+    volatile u64 *p = (volatile u64 *)(m + (i64)lead);
+    u64 w[4];
+    for (u64 r = 0; r < FIX_PLANE / 32; r++) {
+        x_record(r, chroma, w);
+        p[4 * r] = w[0]; p[4 * r + 1] = w[1]; p[4 * r + 2] = w[2]; p[4 * r + 3] = w[3];
+    }
+    __asm__ volatile("dsb sy" : : : "memory");
+    u64 h = 0xCBF29CE484222325UL;
+    for (u64 k = 0; k < FIX_PLANE / 8; k++) { h ^= p[k]; h *= 0x100000001B3UL; }
+    sys_munmap((void *)m, maplen);
+    puts_(", read back: sum "); x_x64(h); puts_(h == want ? " as expected\n" : " DIFFERS from the expected ");
+    if (h != want) { x_x64(want); puts_("\n"); }
+    return h == want;
+}
+
+static void level32(void)
+{
+    puts_("== level 32: the hand-off fixture into picture slot 0 (" FIX_DESIGN ")\n");
+    if (!x_in_dram(FIX_Y_PHYS, FIX_PLANE) || !x_in_dram(FIX_C_PHYS, FIX_PLANE) || !x_in_dram(FIX_GY_PHYS, FIX_GLEN) || !x_in_dram(FIX_GC_PHYS, FIX_GLEN)) {
+        puts_("!! an address of the design is not DRAM\n== level 32 verdict: REFUSED: nothing written\n");
+        return;
+    }
+    i64 fd = sys_open(TEST_ROOT "/dev/mem", X_RW_SYNC, 0);
+    if (fd < 0) { puts_("!! /dev/mem open failed "); putnum(fd); puts_("\n== level 32 verdict: REFUSED: nothing written\n"); return; }
+    int gy = x_look((int)fd, FIX_GY_PHYS, FIX_GLEN, "guard: slot 1 Y head");
+    int gc = x_look((int)fd, FIX_GC_PHYS, FIX_GLEN, "guard: slot 1 C head");
+    x_look((int)fd, FIX_Y_PHYS, FIX_GLEN, "before: slot 0 Y head");
+    x_look((int)fd, FIX_C_PHYS, FIX_GLEN, "before: slot 0 C head");
+    if (gy != 1 || gc != 1) {
+        sys_close((int)fd);
+        puts_("== level 32 verdict: REFUSED: picture slot 1 does not hold the front end's picture (hand-off not in force, or the S-I HD channel has not run); nothing written\n");
+        return;
+    }
+    int y = x_plane((int)fd, FIX_Y_PHYS, 0, FIX_SUM_Y, "Y plane");
+    int c = y >= 0 ? x_plane((int)fd, FIX_C_PHYS, 1, FIX_SUM_C, "C plane") : -1;
+    x_look((int)fd, FIX_Y_PHYS, FIX_GLEN, "after: slot 0 Y head");
+    x_look((int)fd, FIX_C_PHYS, FIX_GLEN, "after: slot 0 C head");
+    sys_close((int)fd);
+    if (y == 1 && c == 1) puts_("== level 32 verdict: WRITTEN: picture slot 0 holds the fixture (both sums as expected)\n");
+    else if (y < 0) puts_("== level 32 verdict: NOT WRITTEN: the Y plane could not be mapped\n");
+    else if (c < 0) puts_("== level 32 verdict: PARTLY WRITTEN: the Y plane only (the C plane could not be mapped)\n");
+    else puts_("== level 32 verdict: WRITTEN BUT A SUM DIFFERS: see the lines above\n");
+}
+#endif
+
+/* ------------------------------------------------------------------ levels 36, 37 and 38: a menu design in one mapped file, with a code block */
+
+/* 2026-11-27 (dsqmenu_v2 and dsqlabel_v1, modding/DSQMENU_V2.md): level 36 checks (read-only), 37 applies, 38 puts back. Everything is in this
+ * process (im.elf), in the file PB_LIB as mapped here; its mapping with file offset 0 gives the load base:
+ *   seg0  byte sites inside the mapping with file offset 0 (virtual address = file offset: appFw.so's first segment, or a whole string bank)
+ *   data  byte sites in the data segment (RELRO), each used only inside a readable PB_LIB mapping at its file offset (as MP_LD)
+ *   ptr   relocated pointers in the data segment: stock = load base + a stock target; target = the code block + an offset
+ *   tree  values in std::maps that start-up code built (root at +0x10 of the container, key +0x20, value +0x24 of a node), one per entry
+ *   block the code block: one read+execute mapping for the code and one read+write page for its data, both anonymous (level 37 makes them)
+ *   label (2026-11-28, dsqmenu_v3) a seg0 slot of four bytes that the design's code block writes at run time (a runtime text id 0x01xxxxxx);
+ *         the helper never writes one, it checks it (the file's id, or a runtime id) and puts it back to the file's id
+ * Only seg0 is needed; the header's counts say which other kinds a design has. Every read and write of this process's memory goes through
+ * /proc/self/mem (pread64 / pwrite64), so an address that is not mapped is an error, never a fault. Apply writes seg0 (table order), the
+ * tree values, the block, ptr (table order), data; put back data, ptr (reverse order), the tree values (reverse), seg0 (reverse: a count the
+ * design writes last goes back first); a failure puts every site this run touched back. Put back leaves the block mapped: nothing may still
+ * be running in it when it goes, so it never goes. */
+#if LEVEL >= 36 && LEVEL <= 38
+#ifndef PB_H
+#error "levels 36 to 38 need -DPB_H with the header that `gen_expected.py --pb <design>` writes"
+#endif
+struct pb_site { u32 off; u8 len, kind; u8 stock[16], changed[16]; };   /* kind 0: a guard, which must hold the stock bytes */
+struct pb_ptr { u32 va, foff, old_target, new_off; };
+struct pb_treev { u32 va; int key, old, new; };                         /* container (virtual address in PB_LIB), key, stock and new value */
+#include PB_H                              /* PB_DESIGN, PB_LIB, PB_N_*, pb_s0[], pb_ds[], pb_ds_foff[], pb_ptr[], pb_trees[], PB_BLOCK_*, pb_block[] */
+#ifndef PB_MAX                             /* the per-entry state arrays: 32, or what a larger design's header asks for (dsqmenu_v4: 64) */
+#define PB_MAX 32
+#endif
+_Static_assert(PB_N_S0 >= 1 && PB_N_S0 <= PB_MAX && PB_N_DS <= PB_MAX && PB_N_PTR <= PB_MAX && PB_N_TREE <= PB_MAX, "pb table sizes");
+_Static_assert(PB_N_PTR == 0 || PB_BLOCK_BYTES >= 32, "pointers need a code block");
+#define NR_pread64 67
+#define NR_pwrite64 68
+#if LEVEL == 36
+#define PB_VERB "check (read-only)"
+#elif LEVEL == 37
+#define PB_VERB "apply"
+#else
+#define PB_VERB "put back"
+#endif
+enum { PB_STOCK = 0, PB_TARGET = 1, PB_OTHER = 2, PB_UNREAD = 3, PB_NONE = 4 };
+
+static i64 pb_pm = -1;                     /* /proc/self/mem */
+static u64 pb_lo, pb_hi, pb_block_at;      /* PB_LIB's mapping with file offset 0 (lo = its load base); the code block (0: none found) */
+static u64 pb_node[PB_MAX];                /* the tree node of each tree entry's key */
+static u8 pb_got_s0[PB_MAX][16];           /* the bytes each seg0 entry held when checked (an undo of a put-back label slot writes them back) */
+
+__attribute__((noinline)) static int pb_rd(u64 at, void *out, u64 n)
+{
+    return sc(NR_pread64, pb_pm, (i64)out, (i64)n, (i64)at, 0, 0) == (i64)n;
+}
+#if LEVEL != 36
+__attribute__((noinline)) static int pb_wr(u64 at, const void *in, u64 n)
+{
+    return sc(NR_pwrite64, pb_pm, (i64)in, (i64)n, (i64)at, 0, 0) == (i64)n;
+}
+#endif
+
+static void pb_x(u64 v)
+{
+    u8 be[8]; int k = 0;
+    for (int i = 0; i < 8; i++) be[i] = (u8)(v >> (8 * (7 - i)));
+    while (k < 7 && !be[k]) k++;
+    puts_("0x"); puthex(be + k, (u64)(8 - k));
+}
+
+static int pb_eq(const u8 *a, const u8 *b, u64 n)
+{
+    for (u64 i = 0; i < n; i++) if (a[i] != b[i]) return 0;
+    return 1;
+}
+
+static int pb_hex(const char **pp, u64 *out)
+{
+    const char *p = *pp; u64 v = 0; int n = 0;
+    for (;; p++, n++) {
+        char c = *p; u32 d;
+        if (c >= '0' && c <= '9') d = (u32)(c - '0');
+        else if (c >= 'a' && c <= 'f') d = (u32)(c - 'a' + 10);
+        else break;
+        v = v << 4 | d;
+    }
+    *pp = p; *out = v;
+    return n;
+}
+
+/* One line of /proc/self/maps whose path ends with "/" PB_LIB. want_base: the line with file offset 0 (start, end, perms). Otherwise the
+ * line that holds [at, at + len) (its perms and its file offset there). */
+static int pb_line(const char *s, u64 n, int want_base, u64 at, u64 len, u64 *lo, u64 *hi, u64 *foff, char *perms)
+{
+    static const volatile char want[] = "/" PB_LIB;      /* volatile: kept as a string in the file, where check_built.py finds it */
+    u64 w = sizeof want - 1, a, b, off;
+    const char *p = s;
+    if (n < w) return 0;
+    for (u64 k = 0; k < w; k++) if (s[n - w + k] != want[k]) return 0;
+    if (!pb_hex(&p, &a) || *p++ != '-' || !pb_hex(&p, &b) || *p++ != ' ') return 0;
+    for (int k = 0; k < 4; k++) { if (!*p) return 0; perms[k] = *p++; }
+    perms[4] = 0;
+    if (*p++ != ' ' || !pb_hex(&p, &off) || b <= a) return 0;
+    if (want_base) {
+        if (off != 0) return 0;
+        *lo = a; *hi = b;
+        return 1;
+    }
+    if (at < a || at >= b || len > b - at) return 0;
+    *foff = off + (at - a);
+    return 1;
+}
+
+__attribute__((noinline)) static int pb_maps(int want_base, u64 at, u64 len, u64 *lo, u64 *hi, u64 *foff, char *perms)
+{
+    static u8 buf[4096];
+    static char line[512];
+    u64 n = 0; int found = 0, over = 0;
+    i64 fd = sys_open(TEST_ROOT "/proc/self/maps", F_RDONLY, 0);
+    if (fd < 0) return 0;
+    for (;;) {
+        i64 r = sys_read((int)fd, buf, sizeof buf);
+        if (r <= 0) break;
+        for (i64 i = 0; i < r; i++) {
+            char c = (char)buf[i];
+            if (c != '\n') { if (n + 1 < sizeof line) line[n++] = c; else over = 1; continue; }
+            line[n] = 0;
+            if (!over && !found && pb_line(line, n, want_base, at, len, lo, hi, foff, perms)) found = 1;
+            n = 0; over = 0;
+        }
+    }
+    sys_close((int)fd);
+    return found;
+}
+
+/* A data-segment entry may be used only inside a readable PB_LIB mapping at its file offset. */
+static int pb_mapped(u64 va, u64 len, u64 foff_want)
+{
+    u64 lo, hi, foff = 0; char perms[8];
+    return pb_maps(0, pb_lo + va, len, &lo, &hi, &foff, perms) && perms[0] == 'r' && foff == foff_want;
+}
+
+/* One byte entry: prints its line and returns PB_STOCK (a guard: as in the file), PB_TARGET, PB_OTHER or PB_UNREAD; the bytes read go to got.
+ * A label slot (kind 2, four bytes) is the file's id (PB_STOCK, shown FILE) or a runtime text id 0x01xxxxxx (PB_TARGET, shown RUNTIME). */
+static int pb_site(const char *tag, const struct pb_site *e, int mapped, u8 *got)
+{
+    puts_("  "); puts_(tag); puts_(e->kind == 2 ? " label " : e->kind ? " site " : " guard "); pb_x(e->off); puts_(" "); putnum(e->len);
+    if (!mapped) { puts_(" !! not in a readable mapping of " PB_LIB " at its file offset\n"); return PB_UNREAD; }
+    if (e->len > 16 || !pb_rd(pb_lo + e->off, got, e->len)) { puts_(" !! not readable\n"); return PB_UNREAD; }
+    int st;
+    if (e->kind == 2) st = pb_eq(got, e->stock, e->len) ? PB_STOCK : e->len == 4 && got[3] == 1 ? PB_TARGET : PB_OTHER;
+    else st = pb_eq(got, e->stock, e->len) ? PB_STOCK : e->kind && pb_eq(got, e->changed, e->len) ? PB_TARGET : PB_OTHER;
+    puts_(st == PB_STOCK ? (e->kind == 2 ? " FILE " : e->kind ? " STOCK " : " SAME ") : st == PB_TARGET ? (e->kind == 2 ? " RUNTIME " : " TARGET ")
+          : e->kind ? " OTHER " : " DIFFERS ");
+    puthex(got, e->len); puts_("\n");
+    return st;
+}
+
+/* A code block at b is ours when every byte but the two words the helper writes is the design's, its base word is this process's load base
+ * of PB_LIB and its data page can be read. */
+__attribute__((noinline)) static int pb_block_ok(u64 b)
+{
+    static u8 got[256];
+    u64 words[2] = { 0, 0 }, nb = PB_BLOCK_BYTES; u32 w = 0;
+    if (!b || (b & 0xfff) || nb < 32) return 0;
+    for (u64 o = 0; o < nb; o += sizeof got) {
+        u64 n = nb - o < sizeof got ? nb - o : sizeof got;
+        if (!pb_rd(b + o, got, n)) return 0;
+        for (u64 i = 0; i < n; i++)
+            if ((o + i < 8 || o + i >= 24) && got[i] != pb_block[o + i]) return 0;
+    }
+    if (!pb_rd(b + 8, words, 16) || words[0] != pb_lo || !pb_rd(words[1], &w, 4)) return 0;
+    return 1;
+}
+
+/* A pointer entry: its line, and PB_STOCK (load base + its stock target), PB_TARGET (a block of ours + its offset), PB_OTHER or PB_UNREAD. */
+static int pb_ptr_state(const struct pb_ptr *p)
+{
+    u64 v = 0;
+    puts_("  ptr "); pb_x(p->va); puts_(" ");
+    if (!pb_mapped(p->va, 8, p->foff)) { puts_("!! not in a readable mapping of " PB_LIB " at its file offset\n"); return PB_UNREAD; }
+    if (!pb_rd(pb_lo + p->va, &v, 8)) { puts_("!! not readable\n"); return PB_UNREAD; }
+    pb_x(v);
+    if (v == pb_lo + p->old_target) { puts_(" STOCK\n"); return PB_STOCK; }
+    u64 b = v - p->new_off;
+    if (pb_block_at ? b == pb_block_at : pb_block_ok(b)) { pb_block_at = b; puts_(" TARGET (the block)\n"); return PB_TARGET; }
+    puts_(" OTHER\n");
+    return PB_OTHER;
+}
+
+/* The node of tree entry i's key, walked as the library's own lookup walks it (at most 64 steps: the trees are red-black); every read through
+ * /proc/self/mem. */
+static int pb_tree(u64 i)
+{
+    const volatile struct pb_treev *t = &pb_trees[i];
+    u64 n = 0; int k = 0, v = 0;
+    puts_("  tree "); pb_x(t->va); puts_(" key "); putnum(t->key);
+    if (!pb_rd(pb_lo + t->va + 0x10, &n, 8)) { puts_(" !! the container is not readable\n"); return PB_UNREAD; }
+    for (u32 steps = 0; n && steps < 64; steps++) {
+        if (!pb_rd(n + 0x20, &k, 4)) { puts_(" !! a node is not readable\n"); return PB_UNREAD; }
+        if (k == t->key) {
+            if (!pb_rd(n + 0x24, &v, 4)) { puts_(" !! the node is not readable\n"); return PB_UNREAD; }
+            pb_node[i] = n;
+            puts_(" node "); pb_x(n); puts_(" value "); putnum(v);
+            int st = v == t->old ? PB_STOCK : v == t->new ? PB_TARGET : PB_OTHER;
+            puts_(st == PB_STOCK ? " STOCK\n" : st == PB_TARGET ? " TARGET\n" : " OTHER\n");
+            return st;
+        }
+        if (!pb_rd(n + (t->key < k ? 0x10 : 0x18), &n, 8)) { puts_(" !! a node is not readable\n"); return PB_UNREAD; }
+    }
+    puts_(" !! not found\n");
+    return PB_UNREAD;
+}
+
+#if LEVEL != 36
+/* One write of this process's memory, read back. Prints "[undo ]<what><address>: written and read back" or the failure. An undo first
+ * reads: memory that already holds the bytes (a write that never landed) needs no write. */
+__attribute__((noinline)) static int pb_put(const char *what, u64 shown, u64 at, const void *bytes, u64 n, int undo)
+{
+    static u8 back[16];
+    int ok = n <= sizeof back && ((undo && pb_rd(at, back, n) && pb_eq(back, (const u8 *)bytes, n))
+                                  || (pb_wr(at, bytes, n) && pb_rd(at, back, n) && pb_eq(back, (const u8 *)bytes, n)));
+    if (!ok) puts_("!! ");
+    if (undo) puts_("undo ");
+    puts_(what); pb_x(shown);
+    puts_(ok ? (undo ? ": put back\n" : ": written and read back\n") : (undo ? ": NOT put back\n" : ": the write through /proc/self/mem did not hold\n"));
+    return ok;
+}
+#endif
+
+#if LEVEL == 37
+/* The code block: code (read+execute) and data (read+write), anonymous and private; the image and the two header words through
+ * /proc/self/mem (the kernel syncs the instruction cache for an executable mapping), then checked as pb_block_ok checks a block it finds. */
+static int pb_make_block(void)
+{
+    u64 len = (PB_BLOCK_BYTES + 0xfffUL) & ~0xfffUL, words[2];
+    i64 code = sc(NR_mmap, 0, (i64)len, 5, 0x22, -1, 0);       /* PROT_READ | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS */
+    i64 data = sc(NR_mmap, 0, 0x1000, 3, 0x22, -1, 0);         /* PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS */
+    int code_ok = (u64)code < 0xfffffffffffff000UL, data_ok = (u64)data < 0xfffffffffffff000UL;
+    if (code_ok && data_ok) {
+        words[0] = pb_lo; words[1] = (u64)data;
+        if (pb_wr((u64)code, pb_block, PB_BLOCK_BYTES) && pb_wr((u64)code + 8, words, 16) && pb_block_ok((u64)code)) {
+            pb_block_at = (u64)code;
+            puts_("block made at "); pb_x((u64)code); puts_(" (code, read+execute, "); putnum((i64)len); puts_(" bytes), data page ");
+            pb_x((u64)data); puts_(" (read+write); written and read back\n");
+            return 1;
+        }
+    }
+    if (code_ok) sys_munmap((void *)code, len);
+    if (data_ok) sys_munmap((void *)data, 0x1000);
+    puts_("!! the block could not be made"); puts_(code_ok && data_ok ? " (written but not read back as the design's)\n" : " (no mapping)\n");
+    return 0;
+}
+#endif
+
+static void pb_run(void)
+{
+    static u8 st_s0[PB_MAX], st_ds[PB_MAX], st_p[PB_MAX], st_t[PB_MAX], tmp[16];
+    u64 n_s0 = PB_N_S0, n_ds = PB_N_DS, n_p = PB_N_PTR, n_t = PB_N_TREE;
+    int bad = 0, n_stock = 0, n_target = 0, n_runtime = 0, n_file = 0;
+    for (u64 i = 0; i < n_s0; i++) {
+        const struct pb_site *e = &pb_s0[i];
+        st_s0[i] = (u8)pb_site("seg0", e, e->off < pb_hi - pb_lo && e->len <= pb_hi - pb_lo - e->off, pb_got_s0[i]);
+    }
+    for (u64 i = 0; i < n_ds; i++) st_ds[i] = (u8)pb_site("data", &pb_ds[i], pb_mapped(pb_ds[i].off, pb_ds[i].len, pb_ds_foff[i]), tmp);
+    for (u64 i = 0; i < n_p; i++) st_p[i] = (u8)pb_ptr_state(&pb_ptr[i]);
+    for (u64 i = 0; i < n_t; i++) st_t[i] = (u8)pb_tree(i);
+    for (u64 i = 0; i < n_s0; i++) {
+        if (st_s0[i] >= PB_OTHER) bad = 1;
+        else if (pb_s0[i].kind == 2) { if (st_s0[i]) n_runtime++; else n_file++; }
+        else if (pb_s0[i].kind) { if (st_s0[i]) n_target++; else n_stock++; }
+    }
+    for (u64 i = 0; i < n_ds; i++) { if (st_ds[i] >= PB_OTHER) bad = 1; else if (pb_ds[i].kind) { if (st_ds[i]) n_target++; else n_stock++; } }
+    int p_stock = 0;
+    for (u64 i = 0; i < n_p; i++) { if (st_p[i] >= PB_OTHER) bad = 1; else if (st_p[i]) n_target++; else { n_stock++; p_stock++; } }
+    (void)p_stock;
+    for (u64 i = 0; i < n_t; i++) { if (st_t[i] >= PB_OTHER) bad = 1; else if (st_t[i]) n_target++; else n_stock++; }
+    if (n_p) {
+        if (pb_block_at) {
+            u64 dp = 0; u32 dw[6] = { 0, 0, 0, 0, 0, 0 };
+            puts_("block in place at "); pb_x(pb_block_at);
+            if (pb_rd(pb_block_at + 16, &dp, 8) && pb_rd(dp, dw, 24)) {
+                puts_(", data "); pb_x(dp); puts_(": staged "); putnum(dw[0]); puts_(" gets "); putnum(dw[1]);
+                puts_(" commits "); putnum(dw[2]); puts_(" last "); putnum(dw[3]); puts_(" label "); putnum(dw[4]); puts_(" id "); pb_x(dw[5]);
+            }
+            puts_("\n");
+        } else puts_("no block in place\n");
+    }
+    puts_("sites: "); putnum(n_stock); puts_(" stock, "); putnum(n_target); puts_(" target");
+    if (n_runtime + n_file) { puts_("; label slots: "); putnum(n_runtime); puts_(" runtime text, "); putnum(n_file); puts_(" the file's"); }
+    puts_(bad ? "; something is neither (see the lines above)\n" : "\n");
+#if LEVEL == 36
+    if (bad) puts_("== level 36 verdict: NOT READY: see the lines above\n");
+    else if (!n_target) puts_("== level 36 verdict: READY: every guard is as in the file and every site holds the stock bytes\n");
+    else if (!n_stock) puts_("== level 36 verdict: APPLIED: every site holds the design's bytes\n");
+    else puts_("== level 36 verdict: PARTLY APPLIED: some sites hold the stock bytes, some the design's\n");
+#else
+    if (bad) { puts_("!! refused: a guard or a site is not as it must be; nothing is written\n"); return; }
+#if LEVEL == 37
+    if (!n_stock) { puts_("NOTHING TO DO: every site already holds the target bytes (apply)\n"); return; }
+#else
+    if (!n_target && !n_runtime) { puts_("NOTHING TO DO: every site already holds the target bytes (put back)\n"); return; }
+#endif
+    puts_("checks passed: every guard is as in the file, every site holds one of the two sets of bytes\n");
+    static u8 done_s0[PB_MAX], done_ds[PB_MAX], done_p[PB_MAX], done_t[PB_MAX];
+    int failed = 0, tv;
+#if LEVEL == 37
+    for (u64 i = 0; i < n_s0 && !failed; i++)
+        if (pb_s0[i].kind == 1 && st_s0[i] == PB_STOCK) { done_s0[i] = 1; failed = !pb_put("seg0 site ", pb_s0[i].off, pb_lo + pb_s0[i].off, pb_s0[i].changed, pb_s0[i].len, 0); }
+    for (u64 i = 0; i < n_t && !failed; i++)
+        if (st_t[i] == PB_STOCK) { tv = pb_trees[i].new; done_t[i] = 1; failed = !pb_put("tree node ", pb_node[i], pb_node[i] + 0x24, &tv, 4, 0); }
+    if (!failed && p_stock && !pb_block_at) failed = !pb_make_block();
+    for (u64 i = 0; i < n_p && !failed; i++)
+        if (st_p[i] == PB_STOCK) {
+            u64 v = pb_block_at + pb_ptr[i].new_off;
+            done_p[i] = 1; failed = !pb_put("ptr ", pb_ptr[i].va, pb_lo + pb_ptr[i].va, &v, 8, 0);
+        }
+    for (u64 i = 0; i < n_ds && !failed; i++)
+        if (pb_ds[i].kind && st_ds[i] == PB_STOCK) { done_ds[i] = 1; failed = !pb_put("data site ", pb_ds[i].off, pb_lo + pb_ds[i].off, pb_ds[i].changed, pb_ds[i].len, 0); }
+    if (!failed) { puts_("DONE: every site holds the target bytes (apply)\n"); return; }
+#else
+    for (u64 i = 0; i < n_ds && !failed; i++)
+        if (pb_ds[i].kind && st_ds[i] == PB_TARGET) { done_ds[i] = 1; failed = !pb_put("data site ", pb_ds[i].off, pb_lo + pb_ds[i].off, pb_ds[i].stock, pb_ds[i].len, 0); }
+    for (u64 k = 0; k < n_p && !failed; k++) {
+        u64 i = n_p - 1 - k, v = pb_lo + pb_ptr[i].old_target;
+        if (st_p[i] == PB_TARGET) { done_p[i] = 1; failed = !pb_put("ptr ", pb_ptr[i].va, pb_lo + pb_ptr[i].va, &v, 8, 0); }
+    }
+    for (u64 k = 0; k < n_t && !failed; k++) {
+        u64 i = n_t - 1 - k;
+        if (st_t[i] == PB_TARGET) { tv = pb_trees[i].old; done_t[i] = 1; failed = !pb_put("tree node ", pb_node[i], pb_node[i] + 0x24, &tv, 4, 0); }
+    }
+    for (u64 k = 0; k < n_s0 && !failed; k++) {
+        u64 i = n_s0 - 1 - k;
+        if (pb_s0[i].kind && st_s0[i] == PB_TARGET)
+            { done_s0[i] = 1; failed = !pb_put(pb_s0[i].kind == 2 ? "seg0 label " : "seg0 site ", pb_s0[i].off, pb_lo + pb_s0[i].off, pb_s0[i].stock, pb_s0[i].len, 0); }
+    }
+    if (!failed) { puts_("DONE: every site holds the target bytes (put back)\n"); return; }
+#endif
+    /* Something failed: every site this run touched goes back to what it held, in the reverse order of the writes. */
+    int undo_bad = 0;
+#if LEVEL == 37
+    for (u64 i = 0; i < n_ds; i++)
+        if (done_ds[i]) undo_bad |= !pb_put("data site ", pb_ds[i].off, pb_lo + pb_ds[i].off, pb_ds[i].stock, pb_ds[i].len, 1);
+    for (u64 k = 0; k < n_p; k++) {
+        u64 i = n_p - 1 - k, v = pb_lo + pb_ptr[i].old_target;
+        if (done_p[i]) undo_bad |= !pb_put("ptr ", pb_ptr[i].va, pb_lo + pb_ptr[i].va, &v, 8, 1);
+    }
+    for (u64 k = 0; k < n_t; k++) {
+        u64 i = n_t - 1 - k;
+        if (done_t[i]) { tv = pb_trees[i].old; undo_bad |= !pb_put("tree node ", pb_node[i], pb_node[i] + 0x24, &tv, 4, 1); }
+    }
+    for (u64 k = 0; k < n_s0; k++) {
+        u64 i = n_s0 - 1 - k;
+        if (done_s0[i]) undo_bad |= !pb_put("seg0 site ", pb_s0[i].off, pb_lo + pb_s0[i].off, pb_s0[i].stock, pb_s0[i].len, 1);
+    }
+#else
+    for (u64 i = 0; i < n_s0; i++)
+        if (done_s0[i])
+            undo_bad |= !pb_put(pb_s0[i].kind == 2 ? "seg0 label " : "seg0 site ", pb_s0[i].off, pb_lo + pb_s0[i].off,
+                                pb_s0[i].kind == 2 ? pb_got_s0[i] : pb_s0[i].changed, pb_s0[i].len, 1);
+    for (u64 i = 0; i < n_t; i++)
+        if (done_t[i]) { tv = pb_trees[i].new; undo_bad |= !pb_put("tree node ", pb_node[i], pb_node[i] + 0x24, &tv, 4, 1); }
+    for (u64 i = 0; i < n_p; i++) {
+        u64 v = pb_block_at + pb_ptr[i].new_off;
+        if (done_p[i]) undo_bad |= !pb_put("ptr ", pb_ptr[i].va, pb_lo + pb_ptr[i].va, &v, 8, 1);
+    }
+    for (u64 i = 0; i < n_ds; i++)
+        if (done_ds[i]) undo_bad |= !pb_put("data site ", pb_ds[i].off, pb_lo + pb_ds[i].off, pb_ds[i].changed, pb_ds[i].len, 1);
+#endif
+    puts_(undo_bad ? "UNDO INCOMPLETE: main-processor memory may be partly changed; cold boot the camera (battery out) before anything else\n"
+                   : "NOT DONE: a step failed; every site this run touched was put back\n");
+#endif
+}
+
+static void pb_level(void)
+{
+    u64 f; char perms[8];
+    puts_("== level " RC_STR(LEVEL) ": " PB_VERB " the sites of " PB_DESIGN " in " PB_LIB "\n");
+    if (!pb_maps(1, 0, 0, &pb_lo, &pb_hi, &f, perms)) { puts_("!! " PB_LIB " is not in this process's list of mappings; nothing is written\n"); return; }
+    puts_(PB_LIB " mapped at "); pb_x(pb_lo); puts_("-"); pb_x(pb_hi); puts_(" "); puts_(perms); puts_("\n");
+    pb_pm = sys_open(TEST_ROOT "/proc/self/mem", LEVEL == 36 ? F_RDONLY : 2, 0);
+    if (pb_pm < 0) { puts_("!! /proc/self/mem open failed "); putnum(pb_pm); puts_("; nothing is written\n"); return; }
+    pb_run();
+    sys_close((int)pb_pm);                 /* the descriptor does not stay open in im.elf */
+    pb_pm = -1;
+}
+#endif
+
 /* ------------------------------------------------------------------ entry */
 
 static void run(void)
@@ -2668,7 +3776,7 @@ static void run(void)
 #if LEVEL == 13 || LEVEL == 14
     level13();
 #endif
-#if LEVEL == 15 || LEVEL == 21 || LEVEL == 28
+#if LEVEL == 15 || LEVEL == 21 || LEVEL == 28 || LEVEL == 33 || LEVEL == 34 || LEVEL == 35 || LEVEL == 39
     level15();
 #endif
 #if LEVEL == 16 || LEVEL == 17
@@ -2694,6 +3802,18 @@ static void run(void)
 #endif
 #if LEVEL == 27
     level27();
+#endif
+#if LEVEL == 29 || LEVEL == 30
+    level29();
+#endif
+#if LEVEL == 31
+    level31();
+#endif
+#if LEVEL == 32
+    level32();
+#endif
+#if LEVEL >= 36 && LEVEL <= 38
+    pb_level();
 #endif
     puts_("== done, bytes written before this line: "); putnum((i64)out_total); puts_("\n");
     if (out_fd >= 0) sys_close(out_fd);

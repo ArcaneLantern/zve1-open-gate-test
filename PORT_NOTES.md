@@ -161,3 +161,47 @@ The rear screen is 3.0-type, 1,036,800 dots = 720 × 480 = **3:2**, and there is
 Known from the first test: every site holds the stock bytes the files predict; the rear panel's type byte is 3 (3:2); the stored record's run-time bytes are +0x11a/+0x11b; a restart does not keep the patch.
 - The physical C2 key's event.
 - The live-view and preview behaviour of the AI-unit body.
+
+## The 4224 × 2816 state (2026-11-28): built and emulated, not run on a camera
+
+The A7S III kit's new state on this body: the central 4224 × 2816 of the sensor's 4240 × 2832, pixel for pixel. Every design is built from the ZV-E1's own files by the A7S III state's generators.
+
+**What decides the size.** The same two rules as on the A7S III, checked in the ZV-E1's own code.
+- The second scaler's division job (`cpapp-b.bin` `0x4e80e8`, run alone on constructed requests) accepts two-unit output widths in multiples of 64 only. It refuses 4240 with one, two and four units, and accepts 4240 × 2816 → 4224 × 2816 with two units (2,192 columns in, 2,112 out, each).
+- The resize fit cuts a 16:9 shape, measured with the stored record's sampling ratio, out of the first stage's reference window. With a window of 4240 × 2816 and the ratio 27/32 the firmware's own calculation returns `4240 2816 8 0 4224 2816 0 0 0 0`: exactly 4224 × 2816 from column 8, scale 1 both ways.
+- So: first stage 2,832 rows from active row 8 (2,816 active), first scaler one to one, second scaler takes the central 4224 columns, file 4224 × 2816.
+
+**The steps.** `L13` / `L14`, the raw write buffer, are the first and last step of this state too.
+
+| Step | Design | What it changes |
+|---|---|---|
+| `D16` / `D17` | `dmm7slot_zv_v1` | ten words of the run-time copy of `DmmCfg.bin` (unit records from `0x257b07c`): seven planes of the 4K layout `0x2b` 13,271,040 → 14,942,208 bytes, the eighth out of the pool, the HD layout `0x29`'s one 4K plane enlarged too. A plane is filled at 1.25 bytes per pixel: 4224 × 2816 needs 14,868,480. The same ten words with 14,745,600 run on the FX6 (fx6-open-gate-test issue 2, Mininoob's design) |
+| `H5` / `H6` | `ogh2816_zv_v1` | the sensor cells of `ogsq_zv_v2`, unchanged; the two picture records (`0xd35f14`, `0xd36acc`) with a first stage of 2,832 rows from active row 8 and the first scaler at step 4096 both ways (front end 4240 × 2816; v2: 4240 × 2392); the 0x170-byte stored record with ratio 27/32 (v2: 16/19). 21 sites, 6,088 bytes |
+| `K16` / `K17` | `outsz4224_zv_v1` | the output-size word `0x199655c`: 3840 × 2160 → 4224 × 2816 |
+| `K19` / `K20` | `ogfile4224_zv_v1` | 205 sites in `av-cam.bin`: encoder request, both encoder cores (rows for the first core 1,408), the 4K memory blocks in the order CD `0x477`, LD `0x486`, multi `0x474`, ES `0x47a`, Level 6, on 29 descriptors (24p and 25p); and 13 in `libmpr.so`, nine of them instructions so that `tkhd`, `stsd` and `PROF` say 4224 × 2816 (the two height instructions are those of `M19`, which ran on a ZV-E1) |
+| `J19` | `ogfile4224nm_zv_v1` | the same without the nine header instructions (`K20` puts it back) |
+| `R19` / `R20` | `ogfile4224r300_zv_v1` | as `K19`, and the profiles of the 100M settings hold Sony's own 300 / 340 Mbps figures and Level 6.1 |
+
+**Checked offline.**
+- Records: the generator rebuilds `ogsq_zv_v2`'s two records byte for byte by the same path, rebuilds the stock pair from its own geometry, and the new pair breaks none of the rules that hold on every stock split pair. The bytes that change against v2 are the same 412 as on the A7S III.
+- Memory: in the ZV-E1's own allocator the changed table behaves as the A7S III's and the FX6's: after a full release one refused request, then 14 planes of 14,942,208; never a plane of the old size. The HD layout then asks 884,736 bytes more than its parent block holds (the FX6's ran 688,128 over): shoot 4K only while it is applied.
+- Encoder, in the ZV-E1's own `av-cam.bin` and `libmpr.so` (another compile than the A7S III's: descriptors of 0x88 bytes; the functions were found by the tables they read and each was first run on stock requests as a control): all 29 changed descriptors answer a 4224 × 2816 request and no other request changes its answer; the clip code; the memory blocks asked in the new order; the MP4 track config, `stsd` entry and `PROF` entry at 4224 × 2816 for every request the stock writer accepts. 24 checks pass.
+- Libraries: 62 cases on a model camera (apply, apply again, put back, each guard wrong, lost writes, `D16` on the table after `L13`, and each library on a camera that holds the 3840 × 2560 state: nothing written, and the other way round). The 45 cases of the earlier steps still pass, and the twelve earlier libraries rebuild to their pinned hashes.
+
+**Not checked offline on this body** (both were on the A7S III).
+- The start-block builder: its control run on stock requests fails here with the A7 IV's context layout, so the design checks on it were left out.
+- The codec firmware's memory calculation: the ZV-E1's codec file is another one. The A7S III's figures (47.6 MB of reference pictures, 13.9 MB of work space) fit the ZV-E1's blocks, but that is an estimate.
+- For both, the design is the A7S III's field for field (the same fields of the same descriptors, 8 bytes lower from +0x5c).
+
+**Not known before a camera says.**
+- Whether the stages after the first scaler take 2,816 rows at 24p on this body (stock 2,392).
+- A first stage that starts 8 rows into the frame on this body (v2 starts at row 0).
+- Whether planes opened before `D16` stay in use. On one FX6 half the frames had a band of wrong rows, which fits planes of the old size still in the ring. The apply runs in stills mode after a cold boot for that reason.
+- Both encoder cores at this size on this body, in-camera playback, heat (this body has no fan), long takes.
+- 25p: the encoder side covers it, the sensor side is the 24p mode's. 60p crashes the camera in every open-gate state so far.
+
+**The real-rows test** (`realrows`: `L13`, `H5`, `L16`, `M19`) puts the new sensor side into the proven 3840 × 2560 file: the second scaler takes the same 4224 × 2816 and reduces it 1.1 times both ways. Only `H5` is new in it, so a failure there points at the records and not at the planes or the encoder.
+
+**The read-only check in this state.** `zvread_v3` knows the 3840 × 2560 state's bytes, so a check or dump taken with the 4224 × 2816 state applied says NOT READY; the report adds a line when the output-size word holds 4224 × 2816, and compares the second scaler's block with the designed one. Each write step checks its own bytes.
+
+**Toolchain note.** `M19` / `M20` stay the files of pull request 2 (another compiler; they ran on a ZV-E1). `build_zv_write.sh` no longer rebuilds them unless `ZV_REBUILD_M=1` is set. `readcheck.c` is the A7 IV map's current file: the twelve earlier libraries build from it to the same bytes.

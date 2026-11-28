@@ -33,8 +33,28 @@ for L in 16 17; do
 done
 for L in 19 20; do
   "${CC[@]}" -DLEVEL=$L '-DMP_H="expected_mp_ogfile2560_hs_s_zv_v1.h"' -DAVCAM_PHYS=0x401000000UL readcheck.c -o "$H/libJit_zv_L$L.so"
-  "${CC[@]}" -DLEVEL=$L '-DMP_H="expected_mp_ogfile2560_hs_s_zv_v2.h"' -DAVCAM_PHYS=0x401000000UL readcheck.c -o "$H/libJit_zv_M$L.so"
+  # M19 / M20 as pinned in zv_run.py are the contributor's builds (pull request 2; they ran on a ZV-E1): 25,344 bytes, another compiler. This
+  # toolchain gives another file (25,976 bytes) from the same source and header, so the pinned pair is kept unless ZV_REBUILD_M=1 is set.
+  if [ ! -f "$H/libJit_zv_M$L.so" ] || [ -n "${ZV_REBUILD_M:-}" ]; then
+    "${CC[@]}" -DLEVEL=$L '-DMP_H="expected_mp_ogfile2560_hs_s_zv_v2.h"' -DAVCAM_PHYS=0x401000000UL readcheck.c -o "$H/libJit_zv_M$L.so"
+  fi
   "${CC[@]}" -DLEVEL=$L '-DMP_H="expected_mp_lcdcycle_zv_v1.h"' -DAVCAM_PHYS=0x401000000UL readcheck.c -o "$H/libJit_zv_C$L.so"
 done
+# The 4224 x 2816 state (2026-11-28; modding/ZVE1_PORT.md): the same levels with other tables. H = sensor side with the first stage passed one to one
+# (ogh2816_zv_v1), D = output planes (dmm7slot_zv_v1: level 16/17 words, not the level 13 engine), K = output size and encoder side at 4224 x 2816,
+# J = the encoder side without the MP4 header size (K20 puts it back too), R = the encoder side with the 100M settings at 300 Mbps.
+for L in 5 6; do
+  "${CC[@]}" -DLEVEL=$L '-DSITES_H="expected_sites_ogh2816_zv_v1.h"' '-DDESIGN_LABEL="ogh2816_zv_v1"' -DIMAGER=0x17f1f64UL -DCTRL_DRVPARAM=0x684U -DREC=0x170U \
+    readcheck.c "$SEN" -o "$H/libJit_zv_H$L.so"
+done
+for L in 16 17; do
+  "${CC[@]}" -DLEVEL=$L '-DWORDS_H="expected_words_dmm7slot_zv_v1.h"' readcheck.c "$SEN" -o "$H/libJit_zv_D$L.so"
+  "${CC[@]}" -DLEVEL=$L '-DWORDS_H="expected_words_outsz4224_zv_v1.h"' readcheck.c "$SEN" -o "$H/libJit_zv_K$L.so"
+done
+for L in 19 20; do
+  "${CC[@]}" -DLEVEL=$L '-DMP_H="expected_mp_ogfile4224_zv_v1.h"' -DAVCAM_PHYS=0x401000000UL readcheck.c -o "$H/libJit_zv_K$L.so"
+  "${CC[@]}" -DLEVEL=$L '-DMP_H="expected_mp_ogfile4224r300_zv_v1.h"' -DAVCAM_PHYS=0x401000000UL readcheck.c -o "$H/libJit_zv_R$L.so"
+done
+"${CC[@]}" -DLEVEL=19 '-DMP_H="expected_mp_ogfile4224nm_zv_v1.h"' -DAVCAM_PHYS=0x401000000UL readcheck.c -o "$H/libJit_zv_J19.so"
 cd "$H"
-for N in L13 L14 L5 L6 L16 L17 L19 L20 M19 M20 S16 S17 C19 C20; do echo "$(sha256sum libJit_zv_$N.so | cut -d' ' -f1) $(stat -c %s libJit_zv_$N.so) $N"; done
+for N in L13 L14 L5 L6 L16 L17 L19 L20 M19 M20 S16 S17 C19 C20 H5 H6 D16 D17 K16 K17 K19 K20 J19 R19 R20; do echo "$(sha256sum libJit_zv_$N.so | cut -d' ' -f1) $(stat -c %s libJit_zv_$N.so) $N"; done

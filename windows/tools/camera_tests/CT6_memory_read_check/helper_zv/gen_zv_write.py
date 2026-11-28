@@ -120,7 +120,11 @@ def dmm_header(name="dmmwb_zv_v1"):
 SIZE_TABLE = (0x1996514, 0x1996514 + 0x80)        # the movie size table, base 0x19964c4 + 0x50
 FIT = (0x1F5C84, 0x1F5C90)                         # the VDF fit-mode words of a 16:9 picture (the fit word 0x1f5c88)
 FRAMES = ((0xE9B3E0, 0xE9B458), (0xE9B458, 0xE9B4D0))   # cpActAfWindow, cpActTrackingFrame (no remote-send widget on this body)
+DMM_UNITS = (0x257b07c, 0x257b07c + 0x14 * 1164)        # the run-time copy of DmmCfg.bin's unit records (build/parse_dmmcfg.py RAM zve1_202; 1,164 records
+#                                                      with the end markers): the 4224x2816 state's output planes (dmm7slot_zv_v1), 2026-11-28
 WORD_REGIONS = {"outsz2560_zv_v1": ((SIZE_TABLE,), ()),
+                "outsz4224_zv_v1": ((SIZE_TABLE,), ()),
+                "dmm7slot_zv_v1": ((DMM_UNITS,), ()),
                 "lcdfill_zv_v2": ((FIT,) + FRAMES, ((0x1F5C34, 0x1F5CB0),))}   # guards: the fit function and its tables
 
 
@@ -139,6 +143,13 @@ def words_header(name):
     for a, b in guards:
         if BASE <= a < IMAGE_END:
             assert IMAGE[a - BASE:a - BASE + len(b)] == b
+    if "dmmcfg_sha256" in d:                             # a design of words in the run-time copy of DmmCfg.bin: every byte is the file's
+        cfg = (EX / "nflasha8/DmmCfg.bin").read_bytes()
+        assert d["dmmcfg_sha256"] == hashlib.sha256(cfg).hexdigest() and "artifact_sha256" not in d
+        for a, old, e in [(a, o, x) for (a, o, _), x in zip(sites, d["sites"])] + [(a, b, g) for (a, b), g in zip(guards, d["guards"])]:
+            f = int(e["file_offset"], 16)
+            assert cfg[f:f + len(old)] == old and (a - DMM_UNITS[0]) % 0x14 + len(old) <= 0x14, "not the file's bytes, or across two records"
+        assert len({a for a, _, _ in sites}) == len(sites)
     assert not any(a < sa + 4 and sa < a + len(b) for a, b in guards for sa, _, _ in sites), "a guard overlaps a site"
     out = [HEAD % name, "/* Words of the coprocessor's RAM tables (cpapp-b.bin 2.02): %d site(s), %d guard(s). */" % (len(sites), len(guards)),
            '#define WORDS_DESIGN "%s"' % name, "struct ram_word { u32 address; u8 stock[4]; u8 changed[4]; };", "static const struct ram_word ram_words[] = {"]
@@ -187,7 +198,10 @@ def mp_header(name):
     g_lm = [(0, lm[:16])]
     for off, _, old, new in tabs["libmpr.so"]:
         if off in code:                                          # an instruction: the guards are the two instructions before it and the two after it
-            g_lm += [(off + k, lm[off + k:off + k + 4]) for k in (-8, -4, 4, 8)]
+            for k in (-8, -4, 4, 8):                             # (one that is itself a site of the design, or already listed, is left out: the
+                g = (off + k, lm[off + k:off + k + 4])           # 4224x2816 designs change a height and the width beside it)
+                if off + k not in code and g not in g_lm:
+                    g_lm.append(g)
             continue
         if len(old) == 4:                                        # a site that is the row's whole raster (width and height): the guard is the codec before it
             assert (off - 4 - COMB) % 0x18 == 0 and struct.unpack("<HH", old) == (3840, 2160)
@@ -286,3 +300,8 @@ if __name__ == "__main__":
     print("mp header ogfile2560_hs_s_zv_v1", mp_header("ogfile2560_hs_s_zv_v1"))
     print("mp header ogfile2560_hs_s_zv_v2", mp_header("ogfile2560_hs_s_zv_v2"))
     print("mp header, C2 routine:", mp_appfw_header())
+    print("4224x2816 state. sites header (H5 / H6):", sites_header("ogh2816_zv_v1"))
+    print("   words header, output planes (D16 / D17):", words_header("dmm7slot_zv_v1"))
+    print("   words header, output size (K16 / K17):", words_header("outsz4224_zv_v1"))
+    for n in ("ogfile4224_zv_v1", "ogfile4224nm_zv_v1", "ogfile4224r300_zv_v1"):
+        print("   mp header %s:" % n, mp_header(n))

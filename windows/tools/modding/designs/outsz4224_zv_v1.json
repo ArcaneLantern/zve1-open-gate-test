@@ -1,0 +1,58 @@
+{
+ "design": "outsz4224_zv_v1",
+ "build": "zve1_202",
+ "title": "Output size of the stock 4K movie request: 3840 x 2160 -> 4224 x 2816 (the entry outsz2560_zv_v1 changes)",
+ "kind": "ram_words",
+ "artifact": "cpapp-b.bin, RAM only: these bytes are not in the file",
+ "generated_by": "build/build_outsz4224_zv.py",
+ "ported_from": {
+  "design": "outsz2560_v1",
+  "build": "a7iv_602"
+ },
+ "table": "movie size table 0x143c784 (0x4293c8 fills it; 0x4456b4 reads the entry for the stock 4K request) [A7 IV addresses; ZV-E1: set-up 0x4aadd8, size table 0x19964c4+0x50 (the A7C II's contents), UHD reader case 0x4c7adc loads base+0x98]",
+ "summary": {
+  "sites": 1,
+  "bytes": 4,
+  "output_size": [
+   3840,
+   2560
+  ],
+  "picture_bytes_at_format_code_2": 12288000,
+  "stock_output_unit_bytes": 13271040,
+  "goes_with": [
+   "dmmwb4688_v1",
+   "ogsq_v3"
+  ]
+ },
+ "sites": [
+  {
+   "ram_address": "0x199655c",
+   "old": "000f7008",
+   "new": "8010000b",
+   "note": "size class 4 (class 3 on the A7 IV), second entry: output width and height [A7 IV 0x143c7bc]"
+  }
+ ],
+ "guards": [
+  {
+   "ram_address": "0x1996554",
+   "bytes": "000f70083e040000",
+   "note": "the entry before: 3840, 2160, memory id 0x43e [A7 IV 0x143c7b4]"
+  },
+  {
+   "ram_address": "0x1996560",
+   "bytes": "d9020000",
+   "note": "this entry's memory id, 0x2d9 [A7 IV 0x143c7c0]"
+  }
+ ],
+ "checked_against": [
+  "build/emu_size_table.py zve1_202 (the ZV-E1's set-up run alone): the same 16 entries as the A7C II's",
+  "the reader 0x4c7adc aligned with the A7C II's 0x4d436c (build/diff_consts.py): case 3 loads base+0x98"
+ ],
+ "not_shown": [
+  "anything on a camera",
+  "the output records' format code on this camera (2 on the A7 IV)"
+ ],
+ "status": "the word and guards of outsz2560_zv_v1 (which runs on a ZV-E1) with another size; never run on a camera",
+ "goes_with": "dmmwb_zv_v1 and dmm7slot_zv_v1 FIRST (the raw write buffer; planes for a 14,868,480-byte picture), ogh2816_zv_v1 (front end 4240 x 2816; the second scaler takes 4224 x 2816 at scale 1) and ogfile4224_zv_v1",
+ "division_job": "the ZV-E1's own job 0x4e80e8 accepts 4240 x 2816 -> 4224 x 2816 with two units of 2112 (build/division_sizes_s3.py --build zve1_202); 4240 wide is refused"
+}

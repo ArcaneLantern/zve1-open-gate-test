@@ -1,0 +1,290 @@
+{
+ "design": "dmm7slot_zv_v1",
+ "build": "zve1_202",
+ "camera": "ZV-E1, firmware 2.02",
+ "kind": "ram_words",
+ "title": "Output planes for a 4224 x 2816 picture: seven 4K-layout planes of 14,942,208 bytes, the eighth out of the pool, and the HD layout's plane enlarged",
+ "status": "built from the firmware's file and run in the ZV-E1's own allocator; NEVER RUN ON A CAMERA. The same ten words with 14,745,600 ran on an FX6 (dmm7slot_fx6_v1)",
+ "credit": "the memory model, the seven-plane idea and the ten words: github.com/ArcaneLantern/fx6-open-gate-test issue 2 (Mininoob)",
+ "artifact": "DmmCfg.bin (the coprocessor's copy: /cp, partition nflasha8)",
+ "dmmcfg_sha256": "602f44a9f5675c9706ce5ea8998541e4d761e35bdf8d79b661c5e7ba75ff3792",
+ "generated_by": "build/build_dmm_s3.py --build zve1_202",
+ "table": "unit records 0x257b07c .. 0x2580b6c (parse_dmmcfg.RAM zve1_202): record = base + seq x 0x14, {0, type, key, size, attributes}",
+ "why": "the ZV-E1 fills an output plane at 1.25 bytes per pixel: 13,271,040 bytes hold 3840 x 2560 (12,288,000); 4224 x 2816 needs 14,868,480",
+ "plane": {
+  "picture": [
+   4224,
+   2816
+  ],
+  "bytes_needed": 14868480,
+  "plane_bytes": 14942208,
+  "to_spare": 73728,
+  "would_also_hold": "4240 x 2816 (14,928,000)"
+ },
+ "sites": [
+  {
+   "ram_address": "0x257e120",
+   "old": "0080ca00",
+   "new": "0000e400",
+   "file_offset": "0x3f04",
+   "note": "HD layout 0x29, its one 4K plane: size 13,271,040 -> 14,942,208 (the layout is then over its parent, as on the FX6)"
+  },
+  {
+   "ram_address": "0x257e184",
+   "old": "0080ca00",
+   "new": "0000e400",
+   "file_offset": "0x4008",
+   "note": "4K layout 0x2b, plane 1 of 8: size 13,271,040 -> 14,942,208"
+  },
+  {
+   "ram_address": "0x257e198",
+   "old": "0080ca00",
+   "new": "0000e400",
+   "file_offset": "0x401c",
+   "note": "4K layout 0x2b, plane 2 of 8: size 13,271,040 -> 14,942,208"
+  },
+  {
+   "ram_address": "0x257e1ac",
+   "old": "0080ca00",
+   "new": "0000e400",
+   "file_offset": "0x4030",
+   "note": "4K layout 0x2b, plane 3 of 8: size 13,271,040 -> 14,942,208"
+  },
+  {
+   "ram_address": "0x257e1c0",
+   "old": "0080ca00",
+   "new": "0000e400",
+   "file_offset": "0x4044",
+   "note": "4K layout 0x2b, plane 4 of 8: size 13,271,040 -> 14,942,208"
+  },
+  {
+   "ram_address": "0x257e1d4",
+   "old": "0080ca00",
+   "new": "0000e400",
+   "file_offset": "0x4058",
+   "note": "4K layout 0x2b, plane 5 of 8: size 13,271,040 -> 14,942,208"
+  },
+  {
+   "ram_address": "0x257e1e8",
+   "old": "0080ca00",
+   "new": "0000e400",
+   "file_offset": "0x406c",
+   "note": "4K layout 0x2b, plane 6 of 8: size 13,271,040 -> 14,942,208"
+  },
+  {
+   "ram_address": "0x257e1fc",
+   "old": "0080ca00",
+   "new": "0000e400",
+   "file_offset": "0x4080",
+   "note": "4K layout 0x2b, plane 7 of 8: size 13,271,040 -> 14,942,208"
+  },
+  {
+   "ram_address": "0x257e20c",
+   "old": "f1030000",
+   "new": "fd070000",
+   "file_offset": "0x4090",
+   "note": "4K layout 0x2b, plane 8: key 0x3f1 -> 0x7fd (it leaves the pool)"
+  },
+  {
+   "ram_address": "0x257e210",
+   "old": "0080ca00",
+   "new": "00100000",
+   "file_offset": "0x4094",
+   "note": "4K layout 0x2b, plane 8: size 13,271,040 -> 4,096"
+  }
+ ],
+ "guards": [
+  {
+   "ram_address": "0x257e114",
+   "bytes": "0000000007000000f1030000",
+   "file_offset": "0x3ef8",
+   "note": "layout 0x29, key 0x3f1 record at 0x257e114: the words this design leaves alone, as in the file"
+  },
+  {
+   "ram_address": "0x257e124",
+   "bytes": "0f010000",
+   "file_offset": "0x3f08",
+   "note": "layout 0x29, key 0x3f1 record at 0x257e114: the words this design leaves alone, as in the file"
+  },
+  {
+   "ram_address": "0x257e178",
+   "bytes": "0000000007000000f1030000",
+   "file_offset": "0x3ffc",
+   "note": "layout 0x2b, key 0x3f1 record at 0x257e178: the words this design leaves alone, as in the file"
+  },
+  {
+   "ram_address": "0x257e188",
+   "bytes": "0f010000",
+   "file_offset": "0x400c",
+   "note": "layout 0x2b, key 0x3f1 record at 0x257e178: the words this design leaves alone, as in the file"
+  },
+  {
+   "ram_address": "0x257e18c",
+   "bytes": "0000000007000000f1030000",
+   "file_offset": "0x4010",
+   "note": "layout 0x2b, key 0x3f1 record at 0x257e18c: the words this design leaves alone, as in the file"
+  },
+  {
+   "ram_address": "0x257e19c",
+   "bytes": "0f010000",
+   "file_offset": "0x4020",
+   "note": "layout 0x2b, key 0x3f1 record at 0x257e18c: the words this design leaves alone, as in the file"
+  },
+  {
+   "ram_address": "0x257e1a0",
+   "bytes": "0000000007000000f1030000",
+   "file_offset": "0x4024",
+   "note": "layout 0x2b, key 0x3f1 record at 0x257e1a0: the words this design leaves alone, as in the file"
+  },
+  {
+   "ram_address": "0x257e1b0",
+   "bytes": "0f010000",
+   "file_offset": "0x4034",
+   "note": "layout 0x2b, key 0x3f1 record at 0x257e1a0: the words this design leaves alone, as in the file"
+  },
+  {
+   "ram_address": "0x257e1b4",
+   "bytes": "0000000007000000f1030000",
+   "file_offset": "0x4038",
+   "note": "layout 0x2b, key 0x3f1 record at 0x257e1b4: the words this design leaves alone, as in the file"
+  },
+  {
+   "ram_address": "0x257e1c4",
+   "bytes": "0f010000",
+   "file_offset": "0x4048",
+   "note": "layout 0x2b, key 0x3f1 record at 0x257e1b4: the words this design leaves alone, as in the file"
+  },
+  {
+   "ram_address": "0x257e1c8",
+   "bytes": "0000000007000000f1030000",
+   "file_offset": "0x404c",
+   "note": "layout 0x2b, key 0x3f1 record at 0x257e1c8: the words this design leaves alone, as in the file"
+  },
+  {
+   "ram_address": "0x257e1d8",
+   "bytes": "0f010000",
+   "file_offset": "0x405c",
+   "note": "layout 0x2b, key 0x3f1 record at 0x257e1c8: the words this design leaves alone, as in the file"
+  },
+  {
+   "ram_address": "0x257e1dc",
+   "bytes": "0000000007000000f1030000",
+   "file_offset": "0x4060",
+   "note": "layout 0x2b, key 0x3f1 record at 0x257e1dc: the words this design leaves alone, as in the file"
+  },
+  {
+   "ram_address": "0x257e1ec",
+   "bytes": "0f010000",
+   "file_offset": "0x4070",
+   "note": "layout 0x2b, key 0x3f1 record at 0x257e1dc: the words this design leaves alone, as in the file"
+  },
+  {
+   "ram_address": "0x257e1f0",
+   "bytes": "0000000007000000f1030000",
+   "file_offset": "0x4074",
+   "note": "layout 0x2b, key 0x3f1 record at 0x257e1f0: the words this design leaves alone, as in the file"
+  },
+  {
+   "ram_address": "0x257e200",
+   "bytes": "0f010000",
+   "file_offset": "0x4084",
+   "note": "layout 0x2b, key 0x3f1 record at 0x257e1f0: the words this design leaves alone, as in the file"
+  },
+  {
+   "ram_address": "0x257e204",
+   "bytes": "0000000007000000",
+   "file_offset": "0x4088",
+   "note": "layout 0x2b, key 0x3f1 record at 0x257e204: the words this design leaves alone, as in the file"
+  },
+  {
+   "ram_address": "0x257e214",
+   "bytes": "0f010000",
+   "file_offset": "0x4098",
+   "note": "layout 0x2b, key 0x3f1 record at 0x257e204: the words this design leaves alone, as in the file"
+  },
+  {
+   "ram_address": "0x257e164",
+   "bytes": "0000000004000000ffffffffffffffff",
+   "file_offset": "0x3f98",
+   "note": "the end marker before the 4K layout's planes"
+  },
+  {
+   "ram_address": "0x257e218",
+   "bytes": "0000000004000000ffffffffffffffff",
+   "file_offset": "0x409c",
+   "note": "the end marker after the 4K layout's planes"
+  },
+  {
+   "ram_address": "0x257d958",
+   "bytes": "00000000140000003900000000006006",
+   "file_offset": "0x33cc",
+   "note": "parent block, key 0x39 in layout 0x1e: 106,954,752 bytes, as in the file"
+  },
+  {
+   "ram_address": "0x257d96c",
+   "bytes": "00000000140000003900000000006006",
+   "file_offset": "0x33e0",
+   "note": "parent block, key 0x39 in layout 0x1e: 106,954,752 bytes, as in the file"
+  },
+  {
+   "ram_address": "0x257d980",
+   "bytes": "00000000140000003900000000006006",
+   "file_offset": "0x33f4",
+   "note": "parent block, key 0x39 in layout 0x1e: 106,954,752 bytes, as in the file"
+  }
+ ],
+ "precondition": "the camera has started (the table is copied from the file at start-up). Written during a USB session; it counts from the next time the parent block is divided, which the picture restart at the end of the session brings about (seen on the tester's FX6)",
+ "restore": "the old words (step D17), or a cold boot: the table is rebuilt from the file at every start",
+ "while_applied": [
+  "14 output planes instead of 17 (two 4K layouts of seven)",
+  "shoot 4K only; HD and S&Q are not tested with it"
+ ],
+ "spare_key": {
+  "key": "0x7fd",
+  "below_the_reader_limit": "0x900",
+  "in_the_file": false,
+  "aligned_words_of_cpapp_with_this_value": 1
+ },
+ "layouts_after": {
+  "0x29": {
+   "total": 107839488,
+   "parent": 106954752,
+   "spare": -884736
+  },
+  "0x2b": {
+   "total": 104599552,
+   "parent": 106954752,
+   "spare": 2355200
+  }
+ },
+ "allocator": {
+  "nothing open when written": [
+   "1 x refused",
+   "14 x 14,942,208",
+   "5 x no group offers the key now"
+  ],
+  "9 planes open when written, all released, then asked again": [
+   "1 x refused",
+   "14 x 14,942,208",
+   "5 x no group offers the key now"
+  ],
+  "17 planes open when written, all released, then asked again": [
+   "1 x refused",
+   "14 x 14,942,208",
+   "5 x no group offers the key now"
+  ],
+  "9 planes open when written, all but the first (the HD layout's) released, then asked again": [
+   "14 x 14,942,208",
+   "6 x no group offers the key now"
+  ],
+  "9 planes open when written, more asked without a release": [
+   "7 x 14,942,208",
+   "13 x no group offers the key now"
+  ]
+ },
+ "not_shown": [
+  "anything on a camera of this model",
+  "that 1.25 bytes per pixel holds in every record format (3840 x 2560 records in the stock planes: one ZV-E1, 2026-11-24)",
+  "what the camera's picture pipeline does with the one refused request after a full release (the FX6 ran with it)"
+ ]
+}
